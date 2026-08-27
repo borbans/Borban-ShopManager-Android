@@ -7,12 +7,17 @@ import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
-import retrofit2.http.*
+import retrofit2.http.Body
+import retrofit2.http.GET
+import retrofit2.http.POST
+import retrofit2.http.Path
+import retrofit2.http.Query
 
 interface ShopApi {
     @POST("borban-shopmanager/api/v1/pair") suspend fun pair(@Body body: PairRequest): ApiEnvelope<PairResponse>
     @GET("borban-shopmanager/api/v1/me") suspend fun me(): ApiEnvelope<Map<String, Any>>
     @GET("borban-shopmanager/api/v1/dashboard") suspend fun dashboard(): ApiEnvelope<Dashboard>
+    @GET("borban-shopmanager/api/v1/statistics") suspend fun statistics(@Query("range") range:String="week"): ApiEnvelope<StatisticsRange>
     @GET("borban-shopmanager/api/v1/orders") suspend fun orders(@Query("limit") limit:Int=50,@Query("search") search:String=""): ApiEnvelope<List<OrderSummary>>
     @GET("borban-shopmanager/api/v1/orders/{id}") suspend fun order(@Path("id") id:String): ApiEnvelope<OrderDetail>
     @POST("borban-shopmanager/api/v1/orders/{id}/transition") suspend fun transition(@Path("id") id:String,@Body body:TransitionRequest): ApiEnvelope<Map<String,Boolean>>

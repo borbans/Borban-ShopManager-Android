@@ -1,18 +1,13 @@
-# Borban Shop Manager Android 0.1.0
+# Borban ShopManager Android 0.2.0
 
-Own Android app for the BorbanShopManager Shopware plugin.
+Read-only Android-App für mehrere Shopware-6.7-Shops mit professionellem Statistik-Dashboard.
 
-## Implemented UI
-- Multi-shop encrypted connection storage
-- Combined dashboard across all paired shops
-- Orders per shop with search
-- Order detail with items, statuses, tracking/customer section
-- Direct status quick actions
-- Pairing with one-time code
-- Firebase Messaging integration prepared without Google Services plugin
+## Neu in 0.2.0
+- neuer Statistik-Tab
+- Zeiträume Woche / Monat / Jahr
+- pro Shop oder über alle gekoppelten Shops
+- Balkendiagramm für Umsatzverlauf
+- Vergleich zum vorherigen Zeitraum
+- modernisiertes Dashboard-Layout
 
-## Privacy
-Push payloads contain no personal data. Order details are requested directly from the selected shop over HTTPS using a device-specific bearer token.
-
-## Firebase
-The project builds with Firebase values empty; push remains inactive. When our own Firebase project exists, fill the four BORBAN_FIREBASE_* values in gradle.properties and configure the matching service account in the Shopware plugins.
+Die App bleibt standardmäßig read-only. Die vorhandenen Schnellaktionen in der Bestellansicht sind weiterhin vorbereitet und funktionieren erst, wenn das Plugin sie freigibt.

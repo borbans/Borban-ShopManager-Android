@@ -15,8 +15,8 @@ android {
         applicationId = "de.borban.shopmanager"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 3
+        versionName = "0.2.0"
         resValue("string", "firebase_app_id", prop("BORBAN_FIREBASE_APP_ID"))
         resValue("string", "firebase_api_key", prop("BORBAN_FIREBASE_API_KEY"))
         resValue("string", "firebase_project_id", prop("BORBAN_FIREBASE_PROJECT_ID"))
