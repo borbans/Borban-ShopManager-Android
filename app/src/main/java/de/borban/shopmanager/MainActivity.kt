@@ -9,13 +9,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,6 +28,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
@@ -45,14 +45,19 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.ShoppingBag
 import androidx.compose.material.icons.outlined.ShowChart
 import androidx.compose.material.icons.outlined.Store
+import androidx.compose.material.icons.outlined.TrendingDown
+import androidx.compose.material.icons.outlined.TrendingFlat
+import androidx.compose.material.icons.outlined.TrendingUp
 import androidx.compose.material.icons.outlined.VerifiedUser
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -60,6 +65,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -76,33 +82,44 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import de.borban.shopmanager.data.Dashboard
 import de.borban.shopmanager.data.OrderDetail
 import de.borban.shopmanager.data.OrderSummary
 import de.borban.shopmanager.data.Repository
 import de.borban.shopmanager.data.ShopConnection
 import de.borban.shopmanager.data.StatBucket
 import de.borban.shopmanager.data.StatisticsRange
-import de.borban.shopmanager.data.Dashboard
 import kotlinx.coroutines.launch
 import java.text.NumberFormat
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.abs
 
-private val Blue = Color(0xFF0C72A7)
-private val Ink = Color(0xFF172033)
-private val Soft = Color(0xFFF5F8FB)
-private val Positive = Color(0xFF127A47)
-private val Negative = Color(0xFFB43131)
+private val Brand = Color(0xFF0A78AE)
+private val BrandDeep = Color(0xFF075B8B)
+private val BrandDark = Color(0xFF073D63)
+private val Aqua = Color(0xFF20B6C9)
+private val Ink = Color(0xFF13233A)
+private val Muted = Color(0xFF6E7B8D)
+private val Canvas = Color(0xFFF3F7FA)
+private val CardSurface = Color(0xFFFFFFFF)
+private val Line = Color(0xFFE1E9EF)
+private val Positive = Color(0xFF12835C)
+private val Negative = Color(0xFFC34242)
+private val Warning = Color(0xFFC27A16)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -128,9 +145,10 @@ private fun PermissionGate() {
 private fun BorbanTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = androidx.compose.material3.lightColorScheme(
-            primary = Blue,
-            background = Soft,
-            surface = Color.White,
+            primary = Brand,
+            secondary = Aqua,
+            background = Canvas,
+            surface = CardSurface,
             onSurface = Ink,
         ),
         content = content,
@@ -147,7 +165,9 @@ class MainVm(private val repo: Repository) : androidx.lifecycle.ViewModel() {
         viewModelScope.launch {
             loading = true
             error = null
-            dashboards = runCatching { repo.dashboards() }.onFailure { error = it.message }.getOrDefault(emptyMap())
+            dashboards = runCatching { repo.dashboards() }
+                .onFailure { error = it.message }
+                .getOrDefault(emptyMap())
             shops = repo.shops()
             loading = false
         }
@@ -174,51 +194,34 @@ fun ShopManagerUi() {
     val vm: MainVm = viewModel(factory = MainVm.factory(ctx))
     var tab by remember { mutableIntStateOf(0) }
     var add by remember { mutableStateOf(false) }
+    var statisticsRange by remember { mutableStateOf("day") }
+    var statisticsShopId by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) { vm.refresh() }
 
     Scaffold(
-        topBar = {
-            androidx.compose.material3.TopAppBar(
-                title = {
-                    Column {
-                        Text("Borban ShopManager", fontWeight = FontWeight.Bold)
-                        Text("Read-only · sichere Direktverbindung", style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.82f))
-                    }
-                },
-                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(containerColor = Blue, titleContentColor = Color.White),
-                actions = {
-                    IconButton(onClick = { vm.refresh() }) { Icon(Icons.Outlined.Refresh, "Aktualisieren", tint = Color.White) }
-                    IconButton(onClick = { add = true }) { Icon(Icons.Outlined.Add, "Shop hinzufügen", tint = Color.White) }
-                },
-            )
-        },
-        bottomBar = {
-            NavigationBar {
-                listOf(
-                    "Übersicht" to Icons.Outlined.Dashboard,
-                    "Statistik" to Icons.Outlined.QueryStats,
-                    "Bestellungen" to Icons.Outlined.ReceiptLong,
-                    "Shops" to Icons.Outlined.Store,
-                ).forEachIndexed { index, (label, icon) ->
-                    NavigationBarItem(
-                        selected = tab == index,
-                        onClick = { tab = index },
-                        icon = { Icon(icon, label) },
-                        label = { Text(label) },
-                    )
-                }
-            }
-        },
-    ) { pad ->
-        Box(Modifier.padding(pad).fillMaxSize()) {
+        containerColor = Canvas,
+        topBar = { PremiumHeader(onRefresh = { vm.refresh() }, onAdd = { add = true }) },
+        bottomBar = { PremiumBottomBar(tab = tab, onTab = { tab = it }) },
+    ) { padding ->
+        Box(Modifier.padding(padding).fillMaxSize()) {
             when (tab) {
-                0 -> DashboardScreen(vm)
-                1 -> StatisticsScreen(vm)
+                0 -> DashboardScreen(vm) { shopId ->
+                    statisticsShopId = shopId
+                    statisticsRange = "day"
+                    tab = 1
+                }
+                1 -> StatisticsScreen(
+                    vm = vm,
+                    range = statisticsRange,
+                    onRangeChange = { statisticsRange = it },
+                    selectedShopId = statisticsShopId,
+                    onShopChange = { statisticsShopId = it },
+                )
                 2 -> OrdersScreen(vm)
                 else -> ShopsScreen(vm) { add = true }
             }
-            if (vm.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (vm.loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Aqua)
         }
     }
 
@@ -226,108 +229,251 @@ fun ShopManagerUi() {
 }
 
 @Composable
-private fun DashboardScreen(vm: MainVm) {
-    val all = vm.dashboards.values
-    val revenue = all.sumOf { it.today.revenue }
-    val orders = all.sumOf { it.today.orders }
-    val open = all.sumOf { it.openOrders }
-    val paid = all.sumOf { it.paidToday }
-    val yesterdayRevenue = all.sumOf { it.yesterday.revenue }
+private fun PremiumHeader(onRefresh: () -> Unit, onAdd: () -> Unit) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .background(Brush.horizontalGradient(listOf(BrandDeep, Brand, Aqua)))
+            .padding(horizontal = 18.dp, vertical = 14.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Borban ShopManager",
+                    color = Color.White,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 1,
+                )
+                Spacer(Modifier.height(3.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(7.dp).clip(CircleShape).background(Color(0xFF8EF1C8)))
+                    Spacer(Modifier.width(7.dp))
+                    Text(
+                        "LIVE · Read-only · sichere Direktverbindung",
+                        color = Color.White.copy(alpha = 0.88f),
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            HeaderAction(Icons.Outlined.Refresh, "Aktualisieren", onRefresh)
+            Spacer(Modifier.width(5.dp))
+            HeaderAction(Icons.Outlined.Add, "Shop hinzufügen", onAdd)
+        }
+    }
+}
+
+@Composable
+private fun HeaderAction(icon: ImageVector, description: String, onClick: () -> Unit) {
+    Surface(color = Color.White.copy(alpha = 0.14f), shape = RoundedCornerShape(14.dp)) {
+        IconButton(onClick = onClick, modifier = Modifier.size(44.dp)) {
+            Icon(icon, description, tint = Color.White)
+        }
+    }
+}
+
+@Composable
+private fun PremiumBottomBar(tab: Int, onTab: (Int) -> Unit) {
+    NavigationBar(containerColor = Color.White, tonalElevation = 8.dp) {
+        listOf(
+            "Übersicht" to Icons.Outlined.Dashboard,
+            "Statistik" to Icons.Outlined.QueryStats,
+            "Bestellungen" to Icons.Outlined.ReceiptLong,
+            "Shops" to Icons.Outlined.Store,
+        ).forEachIndexed { index, (label, icon) ->
+            NavigationBarItem(
+                selected = tab == index,
+                onClick = { onTab(index) },
+                icon = { Icon(icon, label) },
+                label = { Text(label, maxLines = 1, fontSize = 11.sp) },
+                colors = NavigationBarItemDefaults.colors(
+                    selectedIconColor = BrandDark,
+                    selectedTextColor = BrandDark,
+                    indicatorColor = Color(0xFFDDF2FA),
+                    unselectedIconColor = Muted,
+                    unselectedTextColor = Muted,
+                ),
+            )
+        }
+    }
+}
+
+@Composable
+private fun DashboardScreen(vm: MainVm, onOpenStatistics: (String) -> Unit) {
+    val dashboards = vm.dashboards.values
+    val revenue = dashboards.sumOf { it.today.revenue }
+    val orders = dashboards.sumOf { it.today.orders }
+    val open = dashboards.sumOf { it.openOrders }
+    val paid = dashboards.sumOf { it.paidToday }
+    val yesterdayRevenue = dashboards.sumOf { it.yesterday.revenue }
+    val updatedAt = dashboards.map { it.generatedAt }.maxOrNull()
+    var sortMode by remember { mutableStateOf("orders") }
+
+    val sortItems = vm.shops.map { shop ->
+        val dashboard = vm.dashboards[shop]
+        ShopSortItem(
+            id = shop.shopId,
+            name = shop.name,
+            orders = dashboard?.today?.orders ?: 0,
+            revenue = dashboard?.today?.revenue ?: 0.0,
+            open = dashboard?.openOrders ?: 0,
+        )
+    }
+    val sortedIds = sortShopItems(sortItems, sortMode).map { it.id }
+    val sortedShops = sortedIds.mapNotNull { id -> vm.shops.firstOrNull { it.shopId == id } }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 16.dp, bottom = 22.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
-            HeroOverviewCard(revenue = revenue, orders = orders, open = open, paid = paid, yesterdayRevenue = yesterdayRevenue)
+            DashboardHero(revenue, orders, open, paid, yesterdayRevenue)
         }
         item {
-            Text("Shops", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        }
-        if (vm.shops.isEmpty()) {
-            item { EmptyState("Noch kein Shop gekoppelt") }
-        }
-        items(vm.shops) { shop ->
-            val dashboard = vm.dashboards[shop]
-            Card {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(color = Blue.copy(0.10f), shape = RoundedCornerShape(12.dp)) {
-                            Icon(Icons.Outlined.Store, shop.name, tint = Blue, modifier = Modifier.padding(10.dp))
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(shop.name, fontWeight = FontWeight.Bold)
-                            Text(shop.url, style = MaterialTheme.typography.bodySmall, color = Color.Gray, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                        Text(if (dashboard != null) money(dashboard.today.revenue) else "–", fontWeight = FontWeight.Bold)
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        SmallInfoPill("Heute", "${dashboard?.today?.orders ?: 0} Bestellungen", Modifier.weight(1f))
-                        SmallInfoPill("Offen", "${dashboard?.openOrders ?: 0}", Modifier.weight(1f))
-                        SmallInfoPill("Bezahlt", "${dashboard?.paidToday ?: 0}", Modifier.weight(1f))
-                    }
+            Row(verticalAlignment = Alignment.Bottom) {
+                Column(Modifier.weight(1f)) {
+                    SectionTitle("Shops", "Antippen öffnet direkt die Shop-Statistik")
+                    updatedAt?.let { Text("Aktualisiert ${formatUpdatedAt(it)}", color = Muted, fontSize = 10.sp) }
                 }
             }
         }
+        item { DashboardSortSelector(sortMode, onSelect = { sortMode = it }) }
+        if (vm.shops.isEmpty()) {
+            item { EmptyState("Noch kein Shop gekoppelt") }
+        }
+        items(sortedShops, key = { it.shopId }) { shop ->
+            ShopDashboardCard(shop, vm.dashboards[shop]) { onOpenStatistics(shop.shopId) }
+        }
     }
 }
 
 @Composable
-private fun HeroOverviewCard(revenue: Double, orders: Int, open: Int, paid: Int, yesterdayRevenue: Double) {
-    Card {
-        Column(
-            Modifier.fillMaxWidth().padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text("Heute", style = MaterialTheme.typography.labelLarge, color = Blue)
-            Text(money(revenue), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Text(
-                if (yesterdayRevenue > 0) "Gestern ${money(yesterdayRevenue)}" else "Neuer Tag · Live aus deinen Shops",
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color.Gray,
-            )
+private fun DashboardHero(revenue: Double, orders: Int, open: Int, paid: Int, yesterdayRevenue: Double) {
+    val change = percentChange(revenue, yesterdayRevenue)
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(26.dp))
+            .background(Brush.linearGradient(listOf(BrandDark, BrandDeep, Brand)))
+            .padding(20.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("HEUTE", color = Color.White.copy(alpha = 0.72f), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                    Text(money(revenue), color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+                    Text(
+                        if (yesterdayRevenue > 0) "Gestern ${money(yesterdayRevenue)}" else "Live aus allen verbundenen Shops",
+                        color = Color.White.copy(alpha = 0.76f),
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                TrendBadge(change)
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                MetricCard("Bestellungen", orders.toString(), Icons.Outlined.ShoppingBag, Modifier.weight(1f))
-                MetricCard("Offen", open.toString(), Icons.Outlined.PendingActions, Modifier.weight(1f))
-                MetricCard("Bezahlt", paid.toString(), Icons.Outlined.CheckCircle, Modifier.weight(1f))
+                HeroMetric("Bestellungen", orders.toString(), Icons.Outlined.ShoppingBag, Modifier.weight(1f))
+                HeroMetric("Offen", open.toString(), Icons.Outlined.PendingActions, Modifier.weight(1f))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                HeroMetric("Bezahlt", paid.toString(), Icons.Outlined.CheckCircle, Modifier.weight(1f))
+                HeroMetric("Ø Warenkorb", if (orders > 0) money(revenue / orders) else money(0.0), Icons.Outlined.ShowChart, Modifier.weight(1f))
             }
         }
     }
 }
 
 @Composable
-private fun MetricCard(label: String, value: String, icon: ImageVector, modifier: Modifier = Modifier) {
-    Card(modifier) {
-        Column(Modifier.padding(14.dp)) {
-            Icon(icon, label, tint = Blue)
-            Spacer(Modifier.height(10.dp))
-            Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Text(label, color = Color.Gray, style = MaterialTheme.typography.bodySmall)
+private fun HeroMetric(label: String, value: String, icon: ImageVector, modifier: Modifier = Modifier) {
+    Surface(modifier, color = Color.White.copy(alpha = 0.11f), shape = RoundedCornerShape(18.dp)) {
+        Row(Modifier.padding(horizontal = 13.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Surface(color = Color.White.copy(alpha = 0.13f), shape = RoundedCornerShape(12.dp)) {
+                Icon(icon, null, tint = Color.White, modifier = Modifier.padding(8.dp).size(20.dp))
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(value, color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(label, color = Color.White.copy(alpha = 0.68f), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
     }
 }
 
 @Composable
-private fun SmallInfoPill(label: String, value: String, modifier: Modifier = Modifier) {
-    Surface(modifier = modifier, color = Blue.copy(0.06f), shape = RoundedCornerShape(14.dp)) {
-        Column(Modifier.padding(12.dp)) {
-            Text(label, style = MaterialTheme.typography.labelSmall, color = Blue)
-            Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+private fun ShopDashboardCard(shop: ShopConnection, dashboard: Dashboard?, onClick: () -> Unit) {
+    PremiumCard(onClick = onClick) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(color = Color(0xFFE0F3FA), shape = RoundedCornerShape(16.dp)) {
+                    Icon(Icons.Outlined.Store, shop.name, tint = Brand, modifier = Modifier.padding(11.dp).size(24.dp))
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(shop.name, fontWeight = FontWeight.ExtraBold, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(shop.url.removePrefix("https://").removePrefix("http://"), color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(if (dashboard != null) money(dashboard.today.revenue) else "–", fontWeight = FontWeight.ExtraBold, fontSize = 17.sp, maxLines = 1)
+                    Text("heute", color = Muted, fontSize = 11.sp)
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                ShopStat("Bestellungen", (dashboard?.today?.orders ?: 0).toString(), Modifier.weight(1f))
+                ShopStat("Offen", (dashboard?.openOrders ?: 0).toString(), Modifier.weight(1f))
+                ShopStat("Bezahlt", (dashboard?.paidToday ?: 0).toString(), Modifier.weight(1f))
+            }
         }
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun StatisticsScreen(vm: MainVm) {
+private fun ShopStat(label: String, value: String, modifier: Modifier = Modifier) {
+    Surface(modifier, color = Color(0xFFF3F8FB), shape = RoundedCornerShape(16.dp)) {
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 11.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(value, color = Ink, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+            Spacer(Modifier.height(2.dp))
+            Text(label, color = Muted, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+        }
+    }
+}
+
+@Composable
+private fun DashboardSortSelector(selected: String, onSelect: (String) -> Unit) {
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(
+            "orders" to "Bestellungen",
+            "revenue" to "Umsatz",
+            "open" to "Offen",
+            "az" to "A–Z",
+        ).forEach { (key, label) ->
+            PremiumFilterChip(label, selected == key) { onSelect(key) }
+        }
+    }
+}
+
+@Composable
+private fun StatisticsScreen(
+    vm: MainVm,
+    range: String,
+    onRangeChange: (String) -> Unit,
+    selectedShopId: String?,
+    onShopChange: (String?) -> Unit,
+) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val repo = remember(ctx) { Repository(ctx) }
-    var range by remember { mutableStateOf("week") }
-    var selectedShopId by remember(vm.shops) { mutableStateOf<String?>(null) }
     var stats by remember { mutableStateOf<StatisticsRange?>(null) }
     var busy by remember { mutableStateOf(false) }
     var loadError by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(vm.shops, selectedShopId) {
+        if (selectedShopId != null && vm.shops.none { it.shopId == selectedShopId }) {
+            onShopChange(null)
+        }
+    }
 
     LaunchedEffect(range, selectedShopId, vm.shops) {
         if (vm.shops.isEmpty()) {
@@ -337,11 +483,8 @@ private fun StatisticsScreen(vm: MainVm) {
         busy = true
         loadError = null
         val result = runCatching {
-            if (selectedShopId == null) {
-                repo.statisticsAll(range)
-            } else {
-                vm.shops.firstOrNull { it.shopId == selectedShopId }?.let { repo.statistics(it, range) }
-            }
+            if (selectedShopId == null) repo.statisticsAll(range)
+            else vm.shops.firstOrNull { it.shopId == selectedShopId }?.let { repo.statistics(it, range) }
         }
         stats = result.getOrNull()
         loadError = result.exceptionOrNull()?.message
@@ -349,130 +492,246 @@ private fun StatisticsScreen(vm: MainVm) {
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 16.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        item {
-            Text("Statistik", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        }
-        item {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("week" to "Woche", "month" to "Monat", "year" to "Jahr").forEach { (key, label) ->
-                    FilterChip(selected = range == key, onClick = { range = key }, label = { Text(label) })
-                }
-            }
-        }
-        item {
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = selectedShopId == null, onClick = { selectedShopId = null }, label = { Text("Alle Shops") })
-                vm.shops.forEach { shop ->
-                    FilterChip(selected = selectedShopId == shop.shopId, onClick = { selectedShopId = shop.shopId }, label = { Text(shop.name) })
-                }
-            }
-        }
-        if (busy) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-        loadError?.let { message ->
-            item { Text(message, color = MaterialTheme.colorScheme.error) }
-        }
+        item { SectionTitle("Statistik", "Umsatz, Bestellungen und Entwicklung") }
+        item { PeriodSelector(range, onSelect = onRangeChange) }
+        item { ShopSelector(vm.shops, selectedShopId, onSelect = onShopChange) }
+        if (busy) item { LinearProgressIndicator(Modifier.fillMaxWidth(), color = Aqua) }
+        loadError?.let { error -> item { ErrorBanner(error) } }
         if (vm.shops.isEmpty()) {
             item { EmptyState("Noch kein Shop gekoppelt") }
         } else if (stats != null) {
-            item {
-                Text(stats?.label ?: "", style = MaterialTheme.typography.titleMedium, color = Color.Gray)
-            }
+            item { StatisticsHero(stats!!) }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    MetricCard("Umsatz", money(stats!!.summary.revenue), Icons.Outlined.Euro, Modifier.weight(1f))
-                    MetricCard("Bestellungen", stats!!.summary.orders.toString(), Icons.Outlined.ShoppingBag, Modifier.weight(1f))
+                    MetricTile("Bestellungen", stats!!.summary.orders.toString(), Icons.Outlined.ShoppingBag, Modifier.weight(1f))
+                    MetricTile("Ø Warenkorb", money(stats!!.summary.averageOrderValue), Icons.Outlined.ShowChart, Modifier.weight(1f))
                 }
             }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    MetricCard("Ø Warenkorb", money(stats!!.summary.averageOrderValue), Icons.Outlined.ShowChart, Modifier.weight(1f))
-                    MetricCard("Offen", stats!!.summary.openOrders.toString(), Icons.Outlined.PendingActions, Modifier.weight(1f))
+                    MetricTile("Offene Orders", stats!!.summary.openOrders.toString(), Icons.Outlined.PendingActions, Modifier.weight(1f))
+                    MetricTile("Vorperiode", money(stats!!.previous.revenue), Icons.Outlined.QueryStats, Modifier.weight(1f))
                 }
             }
-            item {
-                ComparisonCard(stats!!)
+            item { ComparisonCard(stats!!) }
+            item { RevenueChartCard(stats!!) }
+        }
+    }
+}
+
+@Composable
+private fun PeriodSelector(selected: String, onSelect: (String) -> Unit) {
+    Surface(color = Color.White, shape = RoundedCornerShape(18.dp), border = BorderStroke(1.dp, Line)) {
+        Row(Modifier.fillMaxWidth().padding(5.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            listOf("day" to "Tag", "week" to "Woche", "month" to "Monat", "year" to "Jahr").forEach { (key, label) ->
+                val active = selected == key
+                Surface(
+                    onClick = { onSelect(key) },
+                    modifier = Modifier.weight(1f),
+                    color = if (active) BrandDark else Color.Transparent,
+                    shape = RoundedCornerShape(14.dp),
+                ) {
+                    Text(
+                        label,
+                        modifier = Modifier.padding(vertical = 10.dp),
+                        textAlign = TextAlign.Center,
+                        color = if (active) Color.White else Ink,
+                        fontWeight = if (active) FontWeight.Bold else FontWeight.SemiBold,
+                        maxLines = 1,
+                    )
+                }
             }
-            item {
-                RevenueChartCard(stats!!)
+        }
+    }
+}
+
+@Composable
+private fun ShopSelector(shops: List<ShopConnection>, selectedShopId: String?, onSelect: (String?) -> Unit) {
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        PremiumFilterChip("Alle Shops", selectedShopId == null) { onSelect(null) }
+        shops.forEach { shop -> PremiumFilterChip(shop.name, selectedShopId == shop.shopId) { onSelect(shop.shopId) } }
+    }
+}
+
+@Composable
+private fun PremiumFilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label, maxLines = 1) },
+        leadingIcon = if (selected) ({ Icon(Icons.Outlined.CheckCircle, null, modifier = Modifier.size(17.dp)) }) else null,
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = Color(0xFFDDF2FA),
+            selectedLabelColor = BrandDark,
+            selectedLeadingIconColor = Brand,
+        ),
+        border = FilterChipDefaults.filterChipBorder(
+            enabled = true,
+            selected = selected,
+            borderColor = Line,
+            selectedBorderColor = Color(0xFFB8DCEB),
+        ),
+    )
+}
+
+@Composable
+private fun StatisticsHero(stats: StatisticsRange) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(Brush.linearGradient(listOf(BrandDark, BrandDeep)))
+            .padding(18.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stats.label.uppercase(Locale.GERMANY), color = Color.White.copy(alpha = 0.67f), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text(money(stats.summary.revenue), color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+                    Text("Umsatz", color = Color.White.copy(alpha = 0.72f), fontSize = 13.sp)
+                }
+                TrendBadge(stats.comparison.revenuePercent)
             }
+        }
+    }
+}
+
+@Composable
+private fun MetricTile(label: String, value: String, icon: ImageVector, modifier: Modifier = Modifier) {
+    PremiumCard(modifier.heightIn(min = 118.dp)) {
+        Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.SpaceBetween) {
+            Surface(color = Color(0xFFE1F3FA), shape = RoundedCornerShape(12.dp)) {
+                Icon(icon, null, tint = Brand, modifier = Modifier.padding(8.dp).size(21.dp))
+            }
+            Spacer(Modifier.height(14.dp))
+            Text(value, color = Ink, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(label, color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
 
 @Composable
 private fun ComparisonCard(stats: StatisticsRange) {
-    Card {
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Vergleich zum vorherigen Zeitraum", fontWeight = FontWeight.Bold)
-            ComparisonRow("Umsatz", stats.comparison.revenuePercent)
-            ComparisonRow("Bestellungen", stats.comparison.ordersPercent)
-            ComparisonRow("Ø Warenkorb", stats.comparison.averageOrderValuePercent)
+    PremiumCard {
+        Column(Modifier.padding(17.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
+            SectionMiniTitle("Vergleich zur Vorperiode")
+            ComparisonRow("Umsatz", stats.comparison.revenuePercent, money(stats.previous.revenue))
+            HorizontalDivider(color = Line)
+            ComparisonRow("Bestellungen", stats.comparison.ordersPercent, "${stats.previous.orders}")
+            HorizontalDivider(color = Line)
+            ComparisonRow("Ø Warenkorb", stats.comparison.averageOrderValuePercent, money(stats.previous.averageOrderValue))
         }
     }
 }
 
 @Composable
-private fun ComparisonRow(label: String, value: Double?) {
-    val text = when (value) {
-        null -> "neu"
-        else -> if (value > 0) "+${String.format(Locale.GERMANY, "%.1f", value)} %" else "${String.format(Locale.GERMANY, "%.1f", value)} %"
-    }
-    val color = when {
-        value == null -> Blue
-        value > 0 -> Positive
-        value < 0 -> Negative
-        else -> Color.Gray
+private fun ComparisonRow(label: String, value: Double?, previous: String) {
+    val trendColor = trendColor(value)
+    val icon = when {
+        value == null || value == 0.0 -> Icons.Outlined.TrendingFlat
+        value > 0 -> Icons.Outlined.TrendingUp
+        else -> Icons.Outlined.TrendingDown
     }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, modifier = Modifier.weight(1f))
-        Text(text, color = color, fontWeight = FontWeight.Bold)
+        Surface(color = trendColor.copy(alpha = 0.10f), shape = RoundedCornerShape(12.dp)) {
+            Icon(icon, null, tint = trendColor, modifier = Modifier.padding(8.dp).size(20.dp))
+        }
+        Spacer(Modifier.width(11.dp))
+        Column(Modifier.weight(1f)) {
+            Text(label, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            Text("Vorher $previous", color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Text(percentText(value), color = trendColor, fontWeight = FontWeight.ExtraBold, maxLines = 1)
     }
 }
 
 @Composable
 private fun RevenueChartCard(stats: StatisticsRange) {
-    val maxRevenue = remember(stats) { (stats.buckets.maxOfOrNull { it.revenue } ?: 0.0).coerceAtLeast(1.0) }
-    Card {
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    var mode by remember { mutableStateOf("revenue") }
+    val maxValue = remember(stats, mode) {
+        if (mode == "revenue") stats.buckets.maxOfOrNull { it.revenue } ?: 0.0
+        else stats.buckets.maxOfOrNull { it.orders.toDouble() } ?: 0.0
+    }.coerceAtLeast(1.0)
+
+    PremiumCard {
+        Column(Modifier.padding(17.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.QueryStats, null, tint = Blue)
-                Spacer(Modifier.width(8.dp))
-                Text("Umsatzverlauf", fontWeight = FontWeight.Bold)
+                Column(Modifier.weight(1f)) {
+                    SectionMiniTitle(if (mode == "revenue") "Umsatzverlauf" else "Bestellverlauf")
+                    Text("${stats.buckets.size} Zeitpunkte", color = Muted, fontSize = 11.sp)
+                }
+                MiniChartToggle(mode, onChange = { mode = it })
             }
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(if (stats.buckets.size <= 12) 10.dp else 6.dp),
                 verticalAlignment = Alignment.Bottom,
             ) {
-                stats.buckets.forEach { bucket ->
-                    RevenueBar(bucket, maxRevenue)
+                stats.buckets.forEachIndexed { index, bucket ->
+                    PremiumBar(bucket, maxValue, mode, showLabel = stats.buckets.size <= 12 || index % 5 == 0 || index == stats.buckets.lastIndex)
                 }
             }
-            Text("Balkenhöhe = Umsatz pro Zeitraum", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(8.dp).clip(CircleShape).background(Aqua))
+                Spacer(Modifier.width(6.dp))
+                Text(if (mode == "revenue") "Balkenhöhe = Umsatz" else "Balkenhöhe = Bestellungen", color = Muted, fontSize = 11.sp)
+            }
         }
     }
 }
 
 @Composable
-private fun RevenueBar(bucket: StatBucket, maxRevenue: Double) {
-    val fraction = (bucket.revenue / maxRevenue).coerceIn(0.04, 1.0)
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.widthIn(min = 28.dp)) {
-        Text(if (bucket.revenue > 0.0) moneyShort(bucket.revenue) else "0", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-        Spacer(Modifier.height(6.dp))
-        Box(modifier = Modifier.height(150.dp).width(26.dp), contentAlignment = Alignment.BottomCenter) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height((130 * fraction).dp)
-                    .background(Blue, RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp, bottomStart = 8.dp, bottomEnd = 8.dp)),
-            )
+private fun MiniChartToggle(selected: String, onChange: (String) -> Unit) {
+    Surface(color = Color(0xFFF1F6F9), shape = RoundedCornerShape(12.dp)) {
+        Row(Modifier.padding(3.dp)) {
+            listOf("revenue" to "€", "orders" to "#").forEach { (key, label) ->
+                Surface(
+                    onClick = { onChange(key) },
+                    color = if (selected == key) Color.White else Color.Transparent,
+                    shape = RoundedCornerShape(9.dp),
+                ) {
+                    Text(label, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), color = if (selected == key) BrandDark else Muted, fontWeight = FontWeight.Bold)
+                }
+            }
         }
-        Spacer(Modifier.height(6.dp))
-        Text(bucket.label, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
-        Text("${bucket.orders}", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+    }
+}
+
+@Composable
+private fun PremiumBar(bucket: StatBucket, maxValue: Double, mode: String, showLabel: Boolean) {
+    val value = if (mode == "revenue") bucket.revenue else bucket.orders.toDouble()
+    val fraction = (value / maxValue).coerceIn(if (value > 0) 0.05 else 0.0, 1.0)
+    val width = if (mode == "revenue") 30.dp else 28.dp
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.widthIn(min = 34.dp)) {
+        Text(
+            when {
+                value <= 0 -> ""
+                mode == "revenue" -> moneyCompact(value)
+                else -> value.toInt().toString()
+            },
+            color = Muted,
+            fontSize = 9.sp,
+            maxLines = 1,
+        )
+        Spacer(Modifier.height(5.dp))
+        Box(Modifier.height(146.dp).width(width).clip(RoundedCornerShape(10.dp)).background(Color(0xFFF0F5F8)), contentAlignment = Alignment.BottomCenter) {
+            if (fraction > 0) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height((132 * fraction).dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Brush.verticalGradient(listOf(Aqua, Brand))),
+                )
+            }
+        }
+        Spacer(Modifier.height(7.dp))
+        Text(if (showLabel) bucket.label else "", color = Muted, fontSize = 9.sp, maxLines = 1)
     }
 }
 
@@ -498,24 +757,29 @@ private fun OrdersScreen(vm: MainVm) {
 
     LaunchedEffect(selected) { reload() }
 
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+        Spacer(Modifier.height(16.dp))
         if (vm.shops.isEmpty()) {
             EmptyState("Noch kein Shop gekoppelt")
             return@Column
         }
+        SectionTitle("Bestellungen", "Schneller Überblick ohne PC")
+        Spacer(Modifier.height(12.dp))
         ShopPicker(vm.shops, selected) { selected = it }
         Spacer(Modifier.height(10.dp))
         OutlinedTextField(
             value = search,
             onValueChange = { search = it },
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("Kunde oder Bestellnummer suchen") },
+            shape = RoundedCornerShape(18.dp),
+            singleLine = true,
+            placeholder = { Text("Kunde oder Bestellnummer") },
             leadingIcon = { Icon(Icons.Outlined.Search, null) },
             trailingIcon = { IconButton(onClick = { reload() }) { Icon(Icons.Outlined.ArrowForward, null) } },
         )
-        Spacer(Modifier.height(10.dp))
-        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Spacer(Modifier.height(12.dp))
+        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Aqua)
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 22.dp)) {
             items(list) { order ->
                 OrderCard(order) {
                     val shop = selected ?: return@OrderCard
@@ -539,14 +803,14 @@ private fun OrdersScreen(vm: MainVm) {
 private fun ShopPicker(shops: List<ShopConnection>, selected: ShopConnection?, onSelected: (ShopConnection) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        OutlinedButton(onClick = { expanded = true }) {
+        OutlinedButton(onClick = { expanded = true }, shape = RoundedCornerShape(16.dp)) {
             Icon(Icons.Outlined.Store, null)
             Spacer(Modifier.width(8.dp))
-            Text(selected?.name ?: "Shop wählen")
+            Text(selected?.name ?: "Shop wählen", maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             shops.forEach { shop ->
-                DropdownMenuItem(text = { Text(shop.name) }, onClick = {
+                DropdownMenuItem(text = { Text(shop.name, maxLines = 1) }, onClick = {
                     onSelected(shop)
                     expanded = false
                 })
@@ -557,31 +821,44 @@ private fun ShopPicker(shops: List<ShopConnection>, selected: ShopConnection?, o
 
 @Composable
 private fun OrderCard(order: OrderSummary, onClick: () -> Unit) {
-    Card(onClick = onClick) {
-        Column(Modifier.padding(14.dp)) {
-            Row {
+    PremiumCard(onClick = onClick) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f)) {
-                    Text("#${order.number}", fontWeight = FontWeight.Bold)
-                    Text(order.customer, color = Color.Gray)
+                    Text("#${order.number}", color = Ink, fontWeight = FontWeight.ExtraBold, fontSize = 17.sp, maxLines = 1)
+                    Text(order.customer.ifBlank { "Gastbestellung" }, color = Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                Text(money(order.amount), fontWeight = FontWeight.Bold)
+                Text(money(order.amount), fontWeight = FontWeight.ExtraBold, fontSize = 17.sp, maxLines = 1)
             }
-            Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                StatusChip(order.orderState.label.ifBlank { order.orderState.technical })
-                StatusChip(order.paymentState.label.ifBlank { order.paymentState.technical })
-                StatusChip(order.deliveryState.label.ifBlank { order.deliveryState.technical })
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                StatusChip(operationalStatus(order.orderState.technical, order.deliveryState.technical), emphasized = true)
+                StatusChip("Zahlung: ${order.paymentState.label.ifBlank { order.paymentState.technical }}")
             }
-            Spacer(Modifier.height(8.dp))
-            Text("${order.positions} Positionen · ${formatDate(order.date)}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("${order.positions} ${if (order.positions == 1) "Position" else "Positionen"}", color = Muted, fontSize = 11.sp)
+                Text("  ·  ", color = Line)
+                Text(formatDate(order.date), color = Muted, fontSize = 11.sp)
+            }
         }
     }
 }
 
 @Composable
-private fun StatusChip(text: String) {
-    Surface(shape = RoundedCornerShape(999.dp), color = Blue.copy(0.08f)) {
-        Text(text.ifBlank { "–" }, Modifier.padding(horizontal = 9.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall, color = Blue)
+private fun StatusChip(text: String, emphasized: Boolean = false) {
+    val color = statusColor(text)
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = if (emphasized) color.copy(alpha = 0.16f) else color.copy(alpha = 0.09f),
+        border = if (emphasized) BorderStroke(1.dp, color.copy(alpha = 0.24f)) else null,
+    ) {
+        Text(
+            text.ifBlank { "–" },
+            Modifier.padding(horizontal = if (emphasized) 12.dp else 10.dp, vertical = 5.dp),
+            fontSize = if (emphasized) 11.sp else 10.sp,
+            fontWeight = if (emphasized) FontWeight.ExtraBold else FontWeight.Bold,
+            color = color,
+            maxLines = 1,
+        )
     }
 }
 
@@ -593,7 +870,7 @@ private fun OrderDetailDialog(order: OrderDetail, shop: ShopConnection, onDismis
         title = {
             Column {
                 Text("Bestellung #${order.number}")
-                Text(shop.name, style = MaterialTheme.typography.labelMedium, color = Blue)
+                Text(shop.name, style = MaterialTheme.typography.labelMedium, color = Brand)
             }
         },
         text = {
@@ -602,22 +879,22 @@ private fun OrderDetailDialog(order: OrderDetail, shop: ShopConnection, onDismis
                     Row {
                         Text(money(order.amount), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.weight(1f))
-                        Text(formatDate(order.date), color = Color.Gray)
+                        Text(formatDate(order.date), color = Muted)
                     }
                 }
                 item {
                     Text("Status", fontWeight = FontWeight.Bold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        StatusChip(order.orderState.label)
-                        StatusChip(order.paymentState.label)
-                        StatusChip(order.deliveryState.label)
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        StatusChip(operationalStatus(order.orderState.technical, order.deliveryState.technical), emphasized = true)
+                        StatusChip("Zahlung: ${order.paymentState.label.ifBlank { order.paymentState.technical }}")
+                        StatusChip("Lieferung: ${order.deliveryState.label.ifBlank { order.deliveryState.technical }}")
                     }
                 }
                 items(order.items) { item ->
                     Row {
                         Column(Modifier.weight(1f)) {
                             Text(item.label, fontWeight = FontWeight.SemiBold)
-                            Text("${item.quantity} × ${money(item.unitPrice)} · ${item.productNumber}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                            Text("${item.quantity} × ${money(item.unitPrice)} · ${item.productNumber}", style = MaterialTheme.typography.bodySmall, color = Muted)
                         }
                         Text(money(item.totalPrice))
                     }
@@ -627,7 +904,7 @@ private fun OrderDetailDialog(order: OrderDetail, shop: ShopConnection, onDismis
                         HorizontalDivider()
                         Text("Kunde", fontWeight = FontWeight.Bold)
                         Text("${customer.firstName} ${customer.lastName}")
-                        Text(customer.email, color = Blue)
+                        Text(customer.email, color = Brand)
                         customer.shipping?.let { address ->
                             Text("${address.street}, ${address.zipcode} ${address.city}\n${address.country}", style = MaterialTheme.typography.bodySmall)
                         }
@@ -650,36 +927,39 @@ private fun OrderDetailDialog(order: OrderDetail, shop: ShopConnection, onDismis
 @Composable
 private fun ShopsScreen(vm: MainVm, onAdd: () -> Unit) {
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 16.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(11.dp),
     ) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Gekoppelte Shops", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.weight(1f))
-                Button(onClick = onAdd) {
+                Column(Modifier.weight(1f)) { SectionTitle("Shops", "Gekoppelte Geräteverbindungen") }
+                Button(onClick = onAdd, shape = RoundedCornerShape(15.dp)) {
                     Icon(Icons.Outlined.Add, null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("Hinzufügen")
+                    Spacer(Modifier.width(5.dp))
+                    Text("Neu")
                 }
             }
         }
-        if (vm.shops.isEmpty()) {
-            item { EmptyState("Noch kein Shop gekoppelt") }
-        }
+        if (vm.shops.isEmpty()) item { EmptyState("Noch kein Shop gekoppelt") }
         items(vm.shops) { shop ->
-            Card {
-                Row(Modifier.padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.VerifiedUser, null, tint = Blue)
+            PremiumCard {
+                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Surface(color = Color(0xFFE0F3FA), shape = RoundedCornerShape(15.dp)) {
+                        Icon(Icons.Outlined.VerifiedUser, null, tint = Brand, modifier = Modifier.padding(10.dp).size(23.dp))
+                    }
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(shop.name, fontWeight = FontWeight.Bold)
-                        Text(shop.url, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                        Text("Direktverbindung · eigener Geräteschlüssel", style = MaterialTheme.typography.labelSmall, color = Blue)
+                        Text(shop.name, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(shop.url.removePrefix("https://").removePrefix("http://"), color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Spacer(Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(6.dp).clip(CircleShape).background(Positive))
+                            Spacer(Modifier.width(5.dp))
+                            Text("Direkt verbunden · eigener Geräteschlüssel", color = Positive, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     }
-                    IconButton(onClick = { vm.remove(shop.shopId) }) {
-                        Icon(Icons.Outlined.Delete, "Entfernen")
-                    }
+                    IconButton(onClick = { vm.remove(shop.shopId) }) { Icon(Icons.Outlined.Delete, "Entfernen", tint = Muted) }
                 }
             }
         }
@@ -697,13 +977,13 @@ private fun PairDialog(vm: MainVm, onDismiss: () -> Unit) {
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Shop koppeln") },
+        title = { Text("Shop sicher koppeln") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Die App verbindet sich anschließend direkt per HTTPS mit deinem Shop.", color = Color.Gray)
-                OutlinedTextField(value = url, onValueChange = { url = it }, label = { Text("Shop-URL") }, placeholder = { Text("https://www.vapetrade.de") })
-                OutlinedTextField(value = code, onValueChange = { code = it }, label = { Text("Einmaliger Kopplungscode") })
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Gerätename") })
+                Text("Direkte HTTPS-Verbindung. Keine Shopware-Admin-Zugangsdaten auf dem Gerät.", color = Muted)
+                OutlinedTextField(value = url, onValueChange = { url = it }, label = { Text("Shop-URL") }, placeholder = { Text("https://www.vapetrade.de") }, singleLine = true)
+                OutlinedTextField(value = code, onValueChange = { code = it }, label = { Text("Einmaliger Kopplungscode") }, singleLine = true)
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Gerätename") }, singleLine = true)
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
         },
@@ -722,24 +1002,112 @@ private fun PairDialog(vm: MainVm, onDismiss: () -> Unit) {
                         }.onFailure { error = it.message }
                     }
                 },
-            ) {
-                Text(if (busy) "Verbinden…" else "Sicher koppeln")
-            }
+            ) { Text(if (busy) "Verbinden…" else "Koppeln") }
         },
     )
 }
 
 @Composable
-private fun EmptyState(text: String) {
-    Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.Outlined.Store, null, tint = Color.Gray, modifier = Modifier.size(42.dp))
-            Spacer(Modifier.height(8.dp))
-            Text(text, color = Color.Gray)
+private fun PremiumCard(modifier: Modifier = Modifier, onClick: (() -> Unit)? = null, content: @Composable () -> Unit) {
+    val colors = CardDefaults.cardColors(containerColor = Color.White)
+    val elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    if (onClick != null) {
+        Card(onClick = onClick, modifier = modifier, shape = RoundedCornerShape(22.dp), colors = colors, elevation = elevation, border = BorderStroke(1.dp, Line), content = { content() })
+    } else {
+        Card(modifier = modifier, shape = RoundedCornerShape(22.dp), colors = colors, elevation = elevation, border = BorderStroke(1.dp, Line), content = { content() })
+    }
+}
+
+@Composable
+private fun SectionTitle(title: String, subtitle: String) {
+    Column {
+        Text(title, color = Ink, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+        Text(subtitle, color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun SectionMiniTitle(title: String) {
+    Text(title, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+}
+
+@Composable
+private fun TrendBadge(value: Double?) {
+    val color = trendColor(value)
+    val icon = when {
+        value == null || value == 0.0 -> Icons.Outlined.TrendingFlat
+        value > 0 -> Icons.Outlined.TrendingUp
+        else -> Icons.Outlined.TrendingDown
+    }
+    Surface(color = color.copy(alpha = 0.16f), shape = RoundedCornerShape(14.dp)) {
+        Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, tint = if (color == Muted) Color.White.copy(alpha = 0.8f) else color, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(5.dp))
+            Text(percentText(value), color = if (color == Muted) Color.White.copy(alpha = 0.84f) else color, fontWeight = FontWeight.ExtraBold, fontSize = 12.sp, maxLines = 1)
         }
     }
 }
 
+@Composable
+private fun ErrorBanner(message: String) {
+    Surface(color = Negative.copy(alpha = 0.08f), shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, Negative.copy(alpha = 0.18f))) {
+        Text(message, Modifier.padding(14.dp), color = Negative, fontSize = 12.sp)
+    }
+}
+
+@Composable
+private fun EmptyState(text: String) {
+    PremiumCard {
+        Box(Modifier.fillMaxWidth().padding(vertical = 38.dp), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Surface(color = Color(0xFFE5F3F9), shape = CircleShape) {
+                    Icon(Icons.Outlined.Store, null, tint = Brand, modifier = Modifier.padding(13.dp).size(28.dp))
+                }
+                Spacer(Modifier.height(10.dp))
+                Text(text, color = Muted, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+private fun statusColor(text: String): Color {
+    val lower = text.lowercase(Locale.GERMANY)
+    return when {
+        "bezahlt" in lower || "abgeschlossen" in lower || "erledigt" in lower || "versendet" in lower || "complete" in lower || "shipped" in lower || "paid" in lower -> Positive
+        "bearbeitung" in lower || "progress" in lower -> Warning
+        "storni" in lower || "cancel" in lower || "fehl" in lower -> Negative
+        else -> Brand
+    }
+}
+
+private fun trendColor(value: Double?): Color = when {
+    value == null || value == 0.0 -> Muted
+    value > 0 -> Positive
+    else -> Negative
+}
+
+private fun percentText(value: Double?): String = when {
+    value == null -> "neu"
+    abs(value) < 0.05 -> "0,0 %"
+    value > 0 -> "+${String.format(Locale.GERMANY, "%.1f", value)} %"
+    else -> "${String.format(Locale.GERMANY, "%.1f", value)} %"
+}
+
+private fun percentChange(current: Double, previous: Double): Double? {
+    if (previous == 0.0) return if (current == 0.0) 0.0 else null
+    return ((current - previous) / previous) * 100.0
+}
+
 private fun money(value: Double): String = NumberFormat.getCurrencyInstance(Locale.GERMANY).format(value)
-private fun moneyShort(value: Double): String = if (value >= 1000) String.format(Locale.GERMANY, "%.1fk", value / 1000.0) else String.format(Locale.GERMANY, "%.0f", value)
-private fun formatDate(value: String): String = runCatching { OffsetDateTime.parse(value).format(DateTimeFormatter.ofPattern("dd.MM.yy HH:mm")) }.getOrDefault(value)
+private fun moneyCompact(value: Double): String = when {
+    value >= 1_000_000 -> String.format(Locale.GERMANY, "%.1fM", value / 1_000_000.0)
+    value >= 1_000 -> String.format(Locale.GERMANY, "%.1fk", value / 1_000.0)
+    else -> String.format(Locale.GERMANY, "%.0f", value)
+}
+private fun formatUpdatedAt(value: String): String = runCatching {
+    OffsetDateTime.parse(value).format(DateTimeFormatter.ofPattern("HH:mm"))
+}.getOrDefault("–")
+
+private fun formatDate(value: String): String = runCatching {
+    OffsetDateTime.parse(value).format(DateTimeFormatter.ofPattern("dd.MM.yy HH:mm"))
+}.getOrDefault(value)

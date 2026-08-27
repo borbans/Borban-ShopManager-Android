@@ -1,13 +1,31 @@
-# Borban ShopManager Android 0.2.0
+# Borban ShopManager Android 0.2.1 FINAL Premium
 
-Read-only Android-App für mehrere Shopware-6.7-Shops mit professionellem Statistik-Dashboard.
+Gebundeltes Premium-Update fuer die bestehende 0.2.0-App.
 
-## Neu in 0.2.0
-- neuer Statistik-Tab
-- Zeiträume Woche / Monat / Jahr
-- pro Shop oder über alle gekoppelten Shops
-- Balkendiagramm für Umsatzverlauf
-- Vergleich zum vorherigen Zeitraum
-- modernisiertes Dashboard-Layout
+## Premium UI
+- hochwertiger Gradient-Header und klare Live-Anzeige
+- stabiles 2x2-KPI-Raster ohne unschoene Umbrueche bei 0-Werten
+- Premium-Shopkarten mit stabilen Abmessungen
+- professionelles Balkendiagramm fuer Umsatz und Bestellungen
+- hochwertigere Bestellkarten, Statuschips, Suchfeld und Shopverwaltung
 
-Die App bleibt standardmäßig read-only. Die vorhandenen Schnellaktionen in der Bestellansicht sind weiterhin vorbereitet und funktionieren erst, wenn das Plugin sie freigibt.
+## Neu in FINAL
+- **Tag** ist der erste und standardmaessig ausgewaehlte Statistikzeitraum
+- Tag / Woche / Monat / Jahr
+- Tageschart mit Stundenbalken
+- Shopkarte in der Uebersicht antippen -> direkt zur Statistik genau dieses Shops
+- Shop-Reihenfolge standardmaessig nach **heutigen Bestellungen absteigend**
+- alternativ sortierbar nach Umsatz, Offen oder A-Z
+- kleiner Zeitstempel fuer die letzte Dashboard-Aktualisierung
+- operativer Gesamtstatus in der Bestellliste:
+  - Lieferstatus shipped -> Versendet
+  - sonst Bestellstatus completed -> Erledigt
+  - in_progress -> In Bearbeitung
+  - sonst Offen
+- dadurch stehen widerspruechliche Shopware-Rohstatus nicht mehr im Vordergrund
+
+## Daten / Pairing
+Application ID, ShopStore, verschluesselte Speicherung, Pairing und API-Authentifizierung bleiben unveraendert.
+
+## Update-Sicherheit
+Der offizielle Build muss ab dieser Version dauerhaft mit demselben permanenten Android-Signierschluessel signiert werden. Siehe `SIGNING-SETUP.md`.

@@ -6,6 +6,17 @@ plugins {
 
 fun prop(name: String): String = providers.gradleProperty(name).orElse("").get()
 
+val signingStorePath = System.getenv("BORBAN_KEYSTORE_PATH")
+val signingStorePassword = System.getenv("BORBAN_KEYSTORE_PASSWORD")
+val signingKeyAlias = System.getenv("BORBAN_KEY_ALIAS")
+val signingKeyPassword = System.getenv("BORBAN_KEY_PASSWORD")
+val hasReleaseSigning = listOf(signingStorePath, signingStorePassword, signingKeyAlias, signingKeyPassword).all { !it.isNullOrBlank() }
+val releaseBuildRequested = gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }
+
+if (releaseBuildRequested && !hasReleaseSigning) {
+    throw GradleException("Permanent signing credentials are required for every release build")
+}
+
 android {
     namespace = "de.borban.shopmanager"
     compileSdk = 35
@@ -15,12 +26,32 @@ android {
         applicationId = "de.borban.shopmanager"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.2.0"
+        versionCode = 4
+        versionName = "0.2.1"
         resValue("string", "firebase_app_id", prop("BORBAN_FIREBASE_APP_ID"))
         resValue("string", "firebase_api_key", prop("BORBAN_FIREBASE_API_KEY"))
         resValue("string", "firebase_project_id", prop("BORBAN_FIREBASE_PROJECT_ID"))
         resValue("string", "firebase_sender_id", prop("BORBAN_FIREBASE_SENDER_ID"))
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("borbanRelease") {
+                storeFile = file(signingStorePath!!)
+                storePassword = signingStorePassword
+                keyAlias = signingKeyAlias
+                keyPassword = signingKeyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("release") {
+            isMinifyEnabled = false
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("borbanRelease")
+            }
+        }
     }
     buildFeatures { compose = true; buildConfig = false }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }

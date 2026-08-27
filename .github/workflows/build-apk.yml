@@ -15,10 +15,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -34,12 +34,52 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Build debug APK
-        run: gradle --no-daemon --stacktrace --warning-mode all :app:assembleDebug
+      - name: Verify permanent signing secrets
+        env:
+          KEYSTORE_B64: ${{ secrets.BORBAN_ANDROID_KEYSTORE_B64 }}
+          STORE_PASSWORD: ${{ secrets.BORBAN_ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.BORBAN_ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.BORBAN_ANDROID_KEY_PASSWORD }}
+        run: |
+          test -n "$KEYSTORE_B64" || (echo "Missing BORBAN_ANDROID_KEYSTORE_B64" && exit 1)
+          test -n "$STORE_PASSWORD" || (echo "Missing BORBAN_ANDROID_KEYSTORE_PASSWORD" && exit 1)
+          test -n "$KEY_ALIAS" || (echo "Missing BORBAN_ANDROID_KEY_ALIAS" && exit 1)
+          test -n "$KEY_PASSWORD" || (echo "Missing BORBAN_ANDROID_KEY_PASSWORD" && exit 1)
+
+      - name: Prepare permanent signing keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.BORBAN_ANDROID_KEYSTORE_B64 }}
+        run: |
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/borban-shopmanager-release.jks"
+          chmod 600 "$RUNNER_TEMP/borban-shopmanager-release.jks"
+
+      - name: Build signed release APK
+        env:
+          BORBAN_KEYSTORE_PATH: ${{ runner.temp }}/borban-shopmanager-release.jks
+          BORBAN_KEYSTORE_PASSWORD: ${{ secrets.BORBAN_ANDROID_KEYSTORE_PASSWORD }}
+          BORBAN_KEY_ALIAS: ${{ secrets.BORBAN_ANDROID_KEY_ALIAS }}
+          BORBAN_KEY_PASSWORD: ${{ secrets.BORBAN_ANDROID_KEY_PASSWORD }}
+        run: gradle --no-daemon --stacktrace --warning-mode all :app:assembleRelease
+
+      - name: Verify APK signature
+        env:
+          EXPECTED_CERT_SHA256: 14ea854648998f13af61f9d16a3c81e1555c95ed70b3c1764c286c292109bc75
+        run: |
+          APK=app/build/outputs/apk/release/app-release.apk
+          apksigner verify --verbose --print-certs "$APK"
+          ACTUAL_CERT_SHA256="$(apksigner verify --print-certs "$APK" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
+          test "$ACTUAL_CERT_SHA256" = "$EXPECTED_CERT_SHA256" || {
+            echo "Unexpected signing certificate: $ACTUAL_CERT_SHA256"
+            exit 1
+          }
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Borban-ShopManager-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: Borban-ShopManager-0.2.1-Premium-Signed
+          path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
+
+      - name: Remove signing keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/borban-shopmanager-release.jks"
