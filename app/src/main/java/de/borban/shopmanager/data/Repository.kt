@@ -14,7 +14,7 @@ class Repository(private val context:Context) {
         val s=ShopConnection(p.shop.id,p.shop.name,p.shop.url,p.device.deviceId,p.device.token,p.shop.currency)
         store.save(s); s
     }
-    fun remove(id:String)=store.remove(id)
+    fun remove(connectionKey:String)=store.remove(connectionKey)
     suspend fun dashboards():Map<ShopConnection,Dashboard> = coroutineScope {
         shops().map { s -> async { runCatching { ApiFactory.forShop(s).dashboard().data }.getOrNull()?.let { s to it } } }.awaitAll().filterNotNull().toMap()
     }
@@ -27,6 +27,9 @@ class Repository(private val context:Context) {
     suspend fun order(shop:ShopConnection,id:String) = ApiFactory.forShop(shop).order(id).data
     suspend fun transition(shop:ShopConnection,id:String,group:String,action:String) = ApiFactory.forShop(shop).transition(id,TransitionRequest(group,action)).ok
     suspend fun registerPushToken(token:String) = coroutineScope { shops().map { s -> async { runCatching { ApiFactory.forShop(s).pushToken(PushTokenRequest(token)) } } }.awaitAll() }
+    suspend fun setPushToken(shop:ShopConnection, token:String) = runCatching { ApiFactory.forShop(shop).pushToken(PushTokenRequest(token)) }
+    fun shopByDeviceId(deviceId:String):ShopConnection? = shops().firstOrNull { it.deviceId == deviceId }
+    fun shopByConnectionKey(connectionKey:String):ShopConnection? = shops().firstOrNull { it.connectionKey() == connectionKey }
 
     private fun aggregateStatistics(range:String, entries:List<StatisticsRange>): StatisticsRange? {
         if (entries.isEmpty()) return null

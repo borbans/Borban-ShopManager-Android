@@ -40,6 +40,11 @@ class ShopStore(context: Context) {
     private val master=androidx.security.crypto.MasterKey.Builder(context).setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM).build()
     private val prefs=androidx.security.crypto.EncryptedSharedPreferences.create(context,"borban_shops",master,androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
     fun list():List<ShopConnection> { val raw=prefs.getString("shops","[]") ?: "[]"; return runCatching { gson.fromJson<List<ShopConnection>>(raw,object:TypeToken<List<ShopConnection>>(){}.type) }.getOrDefault(emptyList()) }
-    fun save(shop:ShopConnection) { val all=list().filterNot{it.shopId==shop.shopId || it.url.equals(shop.url,true)}+shop; prefs.edit().putString("shops",gson.toJson(all)).apply() }
-    fun remove(shopId:String) { prefs.edit().putString("shops",gson.toJson(list().filterNot{it.shopId==shopId})).apply() }
+    fun save(shop:ShopConnection) {
+        val all = mergeShopConnection(list(), shop)
+        prefs.edit().putString("shops", gson.toJson(all)).apply()
+    }
+    fun remove(connectionKey:String) {
+        prefs.edit().putString("shops", gson.toJson(list().filterNot { it.connectionKey() == connectionKey })).apply()
+    }
 }

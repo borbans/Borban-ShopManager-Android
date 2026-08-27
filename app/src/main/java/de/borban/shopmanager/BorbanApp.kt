@@ -3,11 +3,13 @@ package de.borban.shopmanager
 import android.app.Application
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
+import de.borban.shopmanager.data.Repository
 import de.borban.shopmanager.push.PushCoordinator
 
 class BorbanApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        PushCoordinator.ensureChannels(this, Repository(this).shops())
         val firebaseAppId = getString(R.string.firebase_app_id)
         val firebaseApiKey = getString(R.string.firebase_api_key)
         val firebaseProjectId = getString(R.string.firebase_project_id)

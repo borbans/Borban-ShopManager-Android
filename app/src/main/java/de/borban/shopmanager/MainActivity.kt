@@ -3,6 +3,7 @@
 package de.borban.shopmanager
 
 import android.Manifest
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -37,6 +38,7 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Euro
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.PendingActions
 import androidx.compose.material.icons.outlined.QueryStats
 import androidx.compose.material.icons.outlined.ReceiptLong
@@ -70,6 +72,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -101,6 +104,10 @@ import de.borban.shopmanager.data.Repository
 import de.borban.shopmanager.data.ShopConnection
 import de.borban.shopmanager.data.StatBucket
 import de.borban.shopmanager.data.StatisticsRange
+import de.borban.shopmanager.data.connectionKey
+import de.borban.shopmanager.push.PushCoordinator
+import de.borban.shopmanager.push.PushNavigation
+import de.borban.shopmanager.push.PushTarget
 import kotlinx.coroutines.launch
 import java.text.NumberFormat
 import java.time.OffsetDateTime
@@ -124,12 +131,19 @@ private val Warning = Color(0xFFC27A16)
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        PushNavigation.openFromIntent(intent)
         setContent {
             BorbanTheme {
                 PermissionGate()
                 ShopManagerUi()
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        PushNavigation.openFromIntent(intent)
     }
 }
 
@@ -175,8 +189,8 @@ class MainVm(private val repo: Repository) : androidx.lifecycle.ViewModel() {
 
     suspend fun pair(url: String, code: String, name: String) = repo.pair(url, code, name).also { shops = repo.shops() }
 
-    fun remove(id: String) {
-        repo.remove(id)
+    fun remove(connectionKey: String) {
+        repo.remove(connectionKey)
         shops = repo.shops()
         refresh()
     }
@@ -195,9 +209,11 @@ fun ShopManagerUi() {
     var tab by remember { mutableIntStateOf(0) }
     var add by remember { mutableStateOf(false) }
     var statisticsRange by remember { mutableStateOf("day") }
-    var statisticsShopId by remember { mutableStateOf<String?>(null) }
+    var statisticsShopKey by remember { mutableStateOf<String?>(null) }
+    val pushTarget = PushNavigation.target
 
     LaunchedEffect(Unit) { vm.refresh() }
+    LaunchedEffect(pushTarget) { if (pushTarget != null) tab = 2 }
 
     Scaffold(
         containerColor = Canvas,
@@ -206,8 +222,8 @@ fun ShopManagerUi() {
     ) { padding ->
         Box(Modifier.padding(padding).fillMaxSize()) {
             when (tab) {
-                0 -> DashboardScreen(vm) { shopId ->
-                    statisticsShopId = shopId
+                0 -> DashboardScreen(vm) { shopKey ->
+                    statisticsShopKey = shopKey
                     statisticsRange = "day"
                     tab = 1
                 }
@@ -215,10 +231,10 @@ fun ShopManagerUi() {
                     vm = vm,
                     range = statisticsRange,
                     onRangeChange = { statisticsRange = it },
-                    selectedShopId = statisticsShopId,
-                    onShopChange = { statisticsShopId = it },
+                    selectedShopKey = statisticsShopKey,
+                    onShopChange = { statisticsShopKey = it },
                 )
-                2 -> OrdersScreen(vm)
+                2 -> OrdersScreen(vm, pushTarget) { PushNavigation.consume() }
                 else -> ShopsScreen(vm) { add = true }
             }
             if (vm.loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Aqua)
@@ -314,7 +330,7 @@ private fun DashboardScreen(vm: MainVm, onOpenStatistics: (String) -> Unit) {
     val sortItems = vm.shops.map { shop ->
         val dashboard = vm.dashboards[shop]
         ShopSortItem(
-            id = shop.shopId,
+            id = shop.connectionKey(),
             name = shop.name,
             orders = dashboard?.today?.orders ?: 0,
             revenue = dashboard?.today?.revenue ?: 0.0,
@@ -322,7 +338,7 @@ private fun DashboardScreen(vm: MainVm, onOpenStatistics: (String) -> Unit) {
         )
     }
     val sortedIds = sortShopItems(sortItems, sortMode).map { it.id }
-    val sortedShops = sortedIds.mapNotNull { id -> vm.shops.firstOrNull { it.shopId == id } }
+    val sortedShops = sortedIds.mapNotNull { id -> vm.shops.firstOrNull { it.connectionKey() == id } }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
@@ -344,8 +360,8 @@ private fun DashboardScreen(vm: MainVm, onOpenStatistics: (String) -> Unit) {
         if (vm.shops.isEmpty()) {
             item { EmptyState("Noch kein Shop gekoppelt") }
         }
-        items(sortedShops, key = { it.shopId }) { shop ->
-            ShopDashboardCard(shop, vm.dashboards[shop]) { onOpenStatistics(shop.shopId) }
+        items(sortedShops, key = { it.connectionKey() }) { shop ->
+            ShopDashboardCard(shop, vm.dashboards[shop]) { onOpenStatistics(shop.connectionKey()) }
         }
     }
 }
@@ -460,7 +476,7 @@ private fun StatisticsScreen(
     vm: MainVm,
     range: String,
     onRangeChange: (String) -> Unit,
-    selectedShopId: String?,
+    selectedShopKey: String?,
     onShopChange: (String?) -> Unit,
 ) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -469,13 +485,13 @@ private fun StatisticsScreen(
     var busy by remember { mutableStateOf(false) }
     var loadError by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(vm.shops, selectedShopId) {
-        if (selectedShopId != null && vm.shops.none { it.shopId == selectedShopId }) {
+    LaunchedEffect(vm.shops, selectedShopKey) {
+        if (selectedShopKey != null && vm.shops.none { it.connectionKey() == selectedShopKey }) {
             onShopChange(null)
         }
     }
 
-    LaunchedEffect(range, selectedShopId, vm.shops) {
+    LaunchedEffect(range, selectedShopKey, vm.shops) {
         if (vm.shops.isEmpty()) {
             stats = null
             return@LaunchedEffect
@@ -483,8 +499,8 @@ private fun StatisticsScreen(
         busy = true
         loadError = null
         val result = runCatching {
-            if (selectedShopId == null) repo.statisticsAll(range)
-            else vm.shops.firstOrNull { it.shopId == selectedShopId }?.let { repo.statistics(it, range) }
+            if (selectedShopKey == null) repo.statisticsAll(range)
+            else vm.shops.firstOrNull { it.connectionKey() == selectedShopKey }?.let { repo.statistics(it, range) }
         }
         stats = result.getOrNull()
         loadError = result.exceptionOrNull()?.message
@@ -498,7 +514,7 @@ private fun StatisticsScreen(
     ) {
         item { SectionTitle("Statistik", "Umsatz, Bestellungen und Entwicklung") }
         item { PeriodSelector(range, onSelect = onRangeChange) }
-        item { ShopSelector(vm.shops, selectedShopId, onSelect = onShopChange) }
+        item { ShopSelector(vm.shops, selectedShopKey, onSelect = onShopChange) }
         if (busy) item { LinearProgressIndicator(Modifier.fillMaxWidth(), color = Aqua) }
         loadError?.let { error -> item { ErrorBanner(error) } }
         if (vm.shops.isEmpty()) {
@@ -550,10 +566,10 @@ private fun PeriodSelector(selected: String, onSelect: (String) -> Unit) {
 }
 
 @Composable
-private fun ShopSelector(shops: List<ShopConnection>, selectedShopId: String?, onSelect: (String?) -> Unit) {
+private fun ShopSelector(shops: List<ShopConnection>, selectedShopKey: String?, onSelect: (String?) -> Unit) {
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        PremiumFilterChip("Alle Shops", selectedShopId == null) { onSelect(null) }
-        shops.forEach { shop -> PremiumFilterChip(shop.name, selectedShopId == shop.shopId) { onSelect(shop.shopId) } }
+        PremiumFilterChip("Alle Shops", selectedShopKey == null) { onSelect(null) }
+        shops.forEach { shop -> PremiumFilterChip(shop.name, selectedShopKey == shop.connectionKey()) { onSelect(shop.connectionKey()) } }
     }
 }
 
@@ -736,7 +752,7 @@ private fun PremiumBar(bucket: StatBucket, maxValue: Double, mode: String, showL
 }
 
 @Composable
-private fun OrdersScreen(vm: MainVm) {
+private fun OrdersScreen(vm: MainVm, pushTarget: PushTarget?, onPushConsumed: () -> Unit) {
     val scope = rememberCoroutineScope()
     var selected by remember(vm.shops) { mutableStateOf(vm.shops.firstOrNull()) }
     var list by remember { mutableStateOf<List<OrderSummary>>(emptyList()) }
@@ -756,6 +772,16 @@ private fun OrdersScreen(vm: MainVm) {
     }
 
     LaunchedEffect(selected) { reload() }
+    LaunchedEffect(pushTarget, vm.shops) {
+        val target = pushTarget ?: return@LaunchedEffect
+        val targetShop = vm.shops.firstOrNull { it.deviceId == target.deviceId } ?: return@LaunchedEffect
+        selected = targetShop
+        busy = true
+        detail = runCatching { repo.order(targetShop, target.orderId) }.getOrNull()
+        list = runCatching { repo.orders(targetShop, search) }.getOrDefault(emptyList())
+        busy = false
+        onPushConsumed()
+    }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         Spacer(Modifier.height(16.dp))
@@ -926,6 +952,7 @@ private fun OrderDetailDialog(order: OrderDetail, shop: ShopConnection, onDismis
 
 @Composable
 private fun ShopsScreen(vm: MainVm, onAdd: () -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 16.dp, bottom = 24.dp),
@@ -942,24 +969,58 @@ private fun ShopsScreen(vm: MainVm, onAdd: () -> Unit) {
             }
         }
         if (vm.shops.isEmpty()) item { EmptyState("Noch kein Shop gekoppelt") }
-        items(vm.shops) { shop ->
+        items(vm.shops, key = { it.connectionKey() }) { shop ->
+            var pushEnabled by remember(shop.deviceId) { mutableStateOf(PushCoordinator.isPushEnabled(ctx, shop)) }
             PremiumCard {
-                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Surface(color = Color(0xFFE0F3FA), shape = RoundedCornerShape(15.dp)) {
-                        Icon(Icons.Outlined.VerifiedUser, null, tint = Brand, modifier = Modifier.padding(10.dp).size(23.dp))
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(color = Color(0xFFE0F3FA), shape = RoundedCornerShape(15.dp)) {
+                            Icon(Icons.Outlined.VerifiedUser, null, tint = Brand, modifier = Modifier.padding(10.dp).size(23.dp))
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(shop.name, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(shop.url.removePrefix("https://").removePrefix("http://"), color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Spacer(Modifier.height(4.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.size(6.dp).clip(CircleShape).background(Positive))
+                                Spacer(Modifier.width(5.dp))
+                                Text("Direkt verbunden · eigener Geräteschlüssel", color = Positive, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                        IconButton(onClick = { vm.remove(shop.connectionKey()) }) { Icon(Icons.Outlined.Delete, "Entfernen", tint = Muted) }
                     }
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(shop.name, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(shop.url.removePrefix("https://").removePrefix("http://"), color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Spacer(Modifier.height(4.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(6.dp).clip(CircleShape).background(Positive))
-                            Spacer(Modifier.width(5.dp))
-                            Text("Direkt verbunden · eigener Geräteschlüssel", color = Positive, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    HorizontalDivider(color = Line)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Outlined.Notifications, null, tint = Brand, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(9.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Bestell-Push", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text(if (pushEnabled) "Aktiv · Shopname, Betrag und Positionen" else "Für diesen Shop deaktiviert", color = Muted, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Switch(checked = pushEnabled, onCheckedChange = { enabled ->
+                            pushEnabled = enabled
+                            PushCoordinator.setPushEnabled(ctx, shop, enabled)
+                        })
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = { PushCoordinator.sendTestNotification(ctx, shop) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(14.dp),
+                        ) {
+                            Text("Testton")
+                        }
+                        OutlinedButton(
+                            onClick = { PushCoordinator.openChannelSettings(ctx, shop) },
+                            modifier = Modifier.weight(1.65f),
+                            shape = RoundedCornerShape(14.dp),
+                        ) {
+                            Icon(Icons.Outlined.Notifications, null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Ton & Vibration")
                         }
                     }
-                    IconButton(onClick = { vm.remove(shop.shopId) }) { Icon(Icons.Outlined.Delete, "Entfernen", tint = Muted) }
                 }
             }
         }
@@ -968,6 +1029,7 @@ private fun ShopsScreen(vm: MainVm, onAdd: () -> Unit) {
 
 @Composable
 private fun PairDialog(vm: MainVm, onDismiss: () -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     var url by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
@@ -996,7 +1058,8 @@ private fun PairDialog(vm: MainVm, onDismiss: () -> Unit) {
                         busy = true
                         val result = vm.pair(url, code, name)
                         busy = false
-                        result.onSuccess {
+                        result.onSuccess { shop ->
+                            PushCoordinator.onShopPaired(ctx, shop)
                             vm.refresh()
                             onDismiss()
                         }.onFailure { error = it.message }

@@ -4,14 +4,17 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-fun prop(name: String): String = providers.gradleProperty(name).orElse("").get()
+fun prop(name: String): String = providers.gradleProperty(name).orElse(providers.environmentVariable(name)).orElse("").get()
 
 val signingStorePath = System.getenv("BORBAN_KEYSTORE_PATH")
 val signingStorePassword = System.getenv("BORBAN_KEYSTORE_PASSWORD")
 val signingKeyAlias = System.getenv("BORBAN_KEY_ALIAS")
 val signingKeyPassword = System.getenv("BORBAN_KEY_PASSWORD")
 val hasReleaseSigning = listOf(signingStorePath, signingStorePassword, signingKeyAlias, signingKeyPassword).all { !it.isNullOrBlank() }
-val releaseBuildRequested = gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }
+val releaseArtifactTasks = setOf("assemble", "assemblerelease", "bundle", "bundlerelease", "installrelease", "packagerelease")
+val releaseBuildRequested = gradle.startParameter.taskNames.any {
+    it.substringAfterLast(':').lowercase() in releaseArtifactTasks
+}
 
 if (releaseBuildRequested && !hasReleaseSigning) {
     throw GradleException("Permanent signing credentials are required for every release build")
@@ -26,8 +29,8 @@ android {
         applicationId = "de.borban.shopmanager"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.2.1"
+        versionCode = 5
+        versionName = "0.2.2"
         resValue("string", "firebase_app_id", prop("BORBAN_FIREBASE_APP_ID"))
         resValue("string", "firebase_api_key", prop("BORBAN_FIREBASE_API_KEY"))
         resValue("string", "firebase_project_id", prop("BORBAN_FIREBASE_PROJECT_ID"))
@@ -78,4 +81,5 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("com.google.firebase:firebase-messaging:24.1.0")
+    testImplementation("junit:junit:4.13.2")
 }
