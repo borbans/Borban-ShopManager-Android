@@ -8,13 +8,17 @@ import de.borban.shopmanager.push.PushCoordinator
 class BorbanApp : Application() {
     override fun onCreate() {
         super.onCreate()
-        if (BuildConfig.FIREBASE_APP_ID.isNotBlank() && BuildConfig.FIREBASE_API_KEY.isNotBlank() && BuildConfig.FIREBASE_PROJECT_ID.isNotBlank() && BuildConfig.FIREBASE_SENDER_ID.isNotBlank()) {
+        val firebaseAppId = getString(R.string.firebase_app_id)
+        val firebaseApiKey = getString(R.string.firebase_api_key)
+        val firebaseProjectId = getString(R.string.firebase_project_id)
+        val firebaseSenderId = getString(R.string.firebase_sender_id)
+        if (firebaseAppId.isNotBlank() && firebaseApiKey.isNotBlank() && firebaseProjectId.isNotBlank() && firebaseSenderId.isNotBlank()) {
             if (FirebaseApp.getApps(this).isEmpty()) {
                 FirebaseApp.initializeApp(this, FirebaseOptions.Builder()
-                    .setApplicationId(BuildConfig.FIREBASE_APP_ID)
-                    .setApiKey(BuildConfig.FIREBASE_API_KEY)
-                    .setProjectId(BuildConfig.FIREBASE_PROJECT_ID)
-                    .setGcmSenderId(BuildConfig.FIREBASE_SENDER_ID)
+                    .setApplicationId(firebaseAppId)
+                    .setApiKey(firebaseApiKey)
+                    .setProjectId(firebaseProjectId)
+                    .setGcmSenderId(firebaseSenderId)
                     .build())
             }
             PushCoordinator.registerCurrentToken(this)

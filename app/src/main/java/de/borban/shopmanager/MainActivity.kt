@@ -36,7 +36,7 @@ class MainActivity:ComponentActivity(){
  override fun onCreate(savedInstanceState:Bundle?){super.onCreate(savedInstanceState);setContent{BorbanTheme{PermissionGate(); ShopManagerUi()}}}
 }
 @Composable private fun PermissionGate(){ if(Build.VERSION.SDK_INT>=33){ val launcher=rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()){}; LaunchedEffect(Unit){launcher.launch(Manifest.permission.POST_NOTIFICATIONS)} } }
-@Composable private fun BorbanTheme(content:@Composable()->Unit){MaterialTheme(colorScheme=lightColorScheme(primary=Blue,background=Soft,surface=Color.White,onSurface=Ink),content=content)}
+@Composable private fun BorbanTheme(content: @Composable () -> Unit){MaterialTheme(colorScheme=lightColorScheme(primary=Blue,background=Soft,surface=Color.White,onSurface=Ink),content=content)}
 
 class MainVm(private val repo:Repository):androidx.lifecycle.ViewModel(){
  var shops by mutableStateOf(repo.shops()); var dashboards by mutableStateOf<Map<ShopConnection,Dashboard>>(emptyMap()); var loading by mutableStateOf(false); var error by mutableStateOf<String?>(null)
@@ -46,10 +46,11 @@ class MainVm(private val repo:Repository):androidx.lifecycle.ViewModel(){
  companion object{fun factory(ctx:android.content.Context)=object:ViewModelProvider.Factory{override fun <T:androidx.lifecycle.ViewModel> create(modelClass:Class<T>):T=MainVm(Repository(ctx)) as T}}
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable fun ShopManagerUi(){
  val ctx=androidx.compose.ui.platform.LocalContext.current; val vm:MainVm=viewModel(factory=MainVm.factory(ctx)); var tab by remember{mutableIntStateOf(0)}; var add by remember{mutableStateOf(false)}
  LaunchedEffect(Unit){vm.refresh()}
- Scaffold(topBar={TopAppBar(title={Column{Text("Borban Shop Manager",fontWeight=FontWeight.Bold);Text("Private Multi-Shop Übersicht",style=MaterialTheme.typography.labelSmall,color=Color.Gray)}},actions={IconButton(onClick={vm.refresh()}){Icon(Icons.Outlined.Refresh,"Aktualisieren")};IconButton(onClick={add=true}){Icon(Icons.Outlined.Add,"Shop hinzufügen")}})},bottomBar={NavigationBar{listOf("Übersicht" to Icons.Outlined.Dashboard,"Bestellungen" to Icons.Outlined.ReceiptLong,"Shops" to Icons.Outlined.Store).forEachIndexed{i,(l,ic)->NavigationBarItem(tab==i,{tab=i},{Icon(ic,l)},{Text(l)})}}}){pad->Box(Modifier.padding(pad).fillMaxSize()){when(tab){0->DashboardScreen(vm);1->OrdersScreen(vm);else->ShopsScreen(vm){add=true}};if(vm.loading)LinearProgressIndicator(Modifier.fillMaxWidth())}}
+ Scaffold(topBar={TopAppBar(title={Column{Text("Borban Shop Manager",fontWeight=FontWeight.Bold);Text("Private Multi-Shop Übersicht",style=MaterialTheme.typography.labelSmall,color=Color.Gray)}},actions={IconButton(onClick={vm.refresh()}){Icon(Icons.Outlined.Refresh,"Aktualisieren")};IconButton(onClick={add=true}){Icon(Icons.Outlined.Add,"Shop hinzufügen")}})},bottomBar={NavigationBar{listOf("Übersicht" to Icons.Outlined.Dashboard,"Bestellungen" to Icons.Outlined.ReceiptLong,"Shops" to Icons.Outlined.Store).forEachIndexed{i,(l,ic)->NavigationBarItem(selected=tab==i,onClick={tab=i},icon={Icon(ic,l)},label={Text(l)})}}}){pad->Box(Modifier.padding(pad).fillMaxSize()){when(tab){0->DashboardScreen(vm);1->OrdersScreen(vm);else->ShopsScreen(vm){add=true}};if(vm.loading)LinearProgressIndicator(Modifier.fillMaxWidth())}}
  if(add) PairDialog(vm){add=false}
 }
 

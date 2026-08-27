@@ -5,11 +5,11 @@ plugins {
 }
 
 fun prop(name: String): String = providers.gradleProperty(name).orElse("").get()
-fun quoted(v: String) = "\"" + v.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 android {
     namespace = "de.borban.shopmanager"
     compileSdk = 35
+    buildToolsVersion = "35.0.0"
 
     defaultConfig {
         applicationId = "de.borban.shopmanager"
@@ -17,12 +17,12 @@ android {
         targetSdk = 35
         versionCode = 2
         versionName = "0.1.1"
-        buildConfigField("String", "FIREBASE_APP_ID", quoted(prop("BORBAN_FIREBASE_APP_ID")))
-        buildConfigField("String", "FIREBASE_API_KEY", quoted(prop("BORBAN_FIREBASE_API_KEY")))
-        buildConfigField("String", "FIREBASE_PROJECT_ID", quoted(prop("BORBAN_FIREBASE_PROJECT_ID")))
-        buildConfigField("String", "FIREBASE_SENDER_ID", quoted(prop("BORBAN_FIREBASE_SENDER_ID")))
+        resValue("string", "firebase_app_id", prop("BORBAN_FIREBASE_APP_ID"))
+        resValue("string", "firebase_api_key", prop("BORBAN_FIREBASE_API_KEY"))
+        resValue("string", "firebase_project_id", prop("BORBAN_FIREBASE_PROJECT_ID"))
+        resValue("string", "firebase_sender_id", prop("BORBAN_FIREBASE_SENDER_ID"))
     }
-    buildFeatures { compose = true; buildConfig = true }
+    buildFeatures { compose = true; buildConfig = false }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
