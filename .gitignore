@@ -1,0 +1,9 @@
+.gradle/
+.idea/
+local.properties
+**/build/
+*.iml
+
+# Local Codex working and delivery directories
+work/
+outputs/
