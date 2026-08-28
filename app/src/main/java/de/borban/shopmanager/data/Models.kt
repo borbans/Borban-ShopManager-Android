@@ -5,7 +5,7 @@ data class DeviceKeys(val deviceId: String, val token: String)
 data class PrivacyInfo(val pushContainsPersonalData: Boolean, val customerDetailsDirectOnly: Boolean)
 data class ShopMeta(val id: String, val name: String, val url: String, val currency: String, val apiVersion: Int, val privacy: PrivacyInfo)
 data class PairResponse(val device: DeviceKeys, val shop: ShopMeta)
-data class PairRequest(val pairingCode: String, val deviceName: String, val appVersion: String = "0.2.3")
+data class PairRequest(val pairingCode: String, val deviceName: String, val appVersion: String = "0.2.4")
 data class ShopConnection(val shopId: String, val name: String, val url: String, val deviceId: String, val token: String, val currency: String)
 data class DayStats(val orders: Int = 0, val revenue: Double = 0.0)
 data class Dashboard(
@@ -27,8 +27,13 @@ data class OrderItem(val id:String,val label:String,val quantity:Int,val unitPri
 data class OrderDetail(val id:String,val number:String,val date:String,val amount:Double,val amountNet:Double,val shippingTotal:Double,val currency:String,val orderState:StateLabel,val paymentState:StateLabel,val deliveryState:StateLabel,val paymentMethod:String,val shippingMethod:String,val trackingCodes:List<String> = emptyList(),val customerComment:String="",val items:List<OrderItem> = emptyList(),val customer:CustomerDetail?=null)
 data class TransitionRequest(val group:String,val action:String)
 data class PushTokenRequest(val token:String)
-data class DropshippingState(val processing:Int=0,val pending:Int=0,val transferred:Int=0,val pendingOrderIds:List<String> = emptyList())
-data class MarkTransferredRequest(val orderIds:List<String>)
+data class DropshippingState(
+    val processing:Int=0,
+    val pending:Int=0,
+    val transferred:Int=0,
+    val pendingOrderIds:List<String> = emptyList(),
+    val processingOrderIds:List<String> = emptyList(),
+)
 
 data class StatSummary(val orders:Int=0,val revenue:Double=0.0,val averageOrderValue:Double=0.0,val openOrders:Int=0)
 data class StatComparison(val revenuePercent:Double?=null,val ordersPercent:Double?=null,val averageOrderValuePercent:Double?=null)

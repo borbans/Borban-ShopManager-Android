@@ -104,6 +104,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import de.borban.shopmanager.data.Dashboard
+import de.borban.shopmanager.data.LocalDropshippingState
 import de.borban.shopmanager.data.OrderDetail
 import de.borban.shopmanager.data.OrderSummary
 import de.borban.shopmanager.data.PendingTransferBatch
@@ -239,15 +240,24 @@ fun ShopManagerUi() {
     val shopPreferences = remember(ctx) { ShopPreferences(ctx) }
     val scope = rememberCoroutineScope()
     var transferPrompt by remember { mutableStateOf<PendingTransferBatch?>(null) }
-    var transferBusy by remember { mutableStateOf(false) }
     var transferError by remember { mutableStateOf<String?>(null) }
+    var localTransferStates by remember { mutableStateOf<Map<String, LocalDropshippingState>>(emptyMap()) }
     var tab by remember { mutableIntStateOf(0) }
     var add by remember { mutableStateOf(false) }
     var statisticsRange by remember { mutableStateOf("day") }
     var statisticsShopKey by remember { mutableStateOf<String?>(null) }
     val pushTarget = PushNavigation.target
 
+    suspend fun refreshLocalTransferStates() {
+        localTransferStates = vm.shops.associate { shop ->
+            val remote = runCatching { repo.dropshipping(shop) }.getOrDefault(de.borban.shopmanager.data.DropshippingState())
+            val processingIds = remote.processingOrderIds.ifEmpty { remote.pendingOrderIds }
+            shop.connectionKey() to shopPreferences.reconcileTransfers(shop, processingIds)
+        }
+    }
+
     LaunchedEffect(Unit) { vm.refresh() }
+    LaunchedEffect(vm.shops, vm.dashboards) { refreshLocalTransferStates() }
     LaunchedEffect(pushTarget) { if (pushTarget != null) tab = 2 }
     LaunchedEffect(TransferReturnSignal.tick) {
         shopPreferences.pendingTransfer()?.takeIf { it.orderIds.isNotEmpty() }?.let { transferPrompt = it }
@@ -257,8 +267,14 @@ fun ShopManagerUi() {
         val url = shopPreferences.portalUrl(shop)
         if (url.isBlank()) return
         scope.launch {
-            val state = runCatching { repo.dropshipping(shop) }.getOrNull()
-            val pendingIds = state?.pendingOrderIds.orEmpty()
+            val state = runCatching { repo.dropshipping(shop) }.getOrElse {
+                transferError = "Bearbeitungsstatus konnte nicht geladen werden."
+                return@launch
+            }
+            val processingIds = state?.processingOrderIds.orEmpty().ifEmpty { state?.pendingOrderIds.orEmpty() }
+            val localState = shopPreferences.reconcileTransfers(shop, processingIds)
+            localTransferStates = localTransferStates + (shop.connectionKey() to localState)
+            val pendingIds = localState.pendingOrderIds
             if (pendingIds.isNotEmpty()) shopPreferences.beginTransfer(shop, pendingIds)
             TransferReturnSignal.arm()
             runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
@@ -271,7 +287,15 @@ fun ShopManagerUi() {
 
     Scaffold(
         containerColor = Canvas,
-        topBar = { PremiumHeader(onRefresh = { vm.refresh() }, onAdd = { add = true }) },
+        topBar = {
+            PremiumHeader(
+                onRefresh = {
+                    vm.refresh()
+                    scope.launch { refreshLocalTransferStates() }
+                },
+                onAdd = { add = true },
+            )
+        },
         bottomBar = { PremiumBottomBar(tab = tab, onTab = { tab = it }) },
     ) { padding ->
         Box(Modifier.padding(padding).fillMaxSize()) {
@@ -279,6 +303,7 @@ fun ShopManagerUi() {
                 0 -> DashboardScreen(
                     vm = vm,
                     shopPreferences = shopPreferences,
+                    localTransferStates = localTransferStates,
                     onOpenStatistics = { shopKey ->
                         statisticsShopKey = shopKey
                         statisticsRange = "day"
@@ -315,26 +340,18 @@ fun ShopManagerUi() {
                 title = { Text("Übertragung") },
                 text = { Text("${batch.orderIds.size} ${if (batch.orderIds.size == 1) "Bestellung" else "Bestellungen"} übertragen?") },
                 dismissButton = {
-                    TextButton(enabled = !transferBusy, onClick = {
+                    TextButton(onClick = {
                         shopPreferences.clearPendingTransfer()
                         transferPrompt = null
                     }) { Text("Noch nicht") }
                 },
                 confirmButton = {
-                    Button(enabled = !transferBusy, onClick = {
-                        scope.launch {
-                            transferBusy = true
-                            val result = runCatching { repo.markTransferred(shop, batch.orderIds) }
-                            transferBusy = false
-                            if (result.isSuccess) {
-                                shopPreferences.clearPendingTransfer()
-                                transferPrompt = null
-                                vm.refresh()
-                            } else {
-                                transferError = "Übertragungsstatus konnte nicht gespeichert werden."
-                            }
-                        }
-                    }) { Text(if (transferBusy) "Speichere…" else "Ja") }
+                    Button(onClick = {
+                        shopPreferences.markTransferred(shop, batch.orderIds)
+                        shopPreferences.clearPendingTransfer()
+                        transferPrompt = null
+                        scope.launch { refreshLocalTransferStates() }
+                    }) { Text("Ja") }
                 },
             )
         }
@@ -427,6 +444,7 @@ private fun PremiumBottomBar(tab: Int, onTab: (Int) -> Unit) {
 private fun DashboardScreen(
     vm: MainVm,
     shopPreferences: ShopPreferences,
+    localTransferStates: Map<String, LocalDropshippingState>,
     onOpenStatistics: (String) -> Unit,
     onTransfer: (ShopConnection) -> Unit,
 ) {
@@ -477,6 +495,7 @@ private fun DashboardScreen(
             ShopDashboardCard(
                 shop = shop,
                 dashboard = vm.dashboards[shop],
+                localTransferState = localTransferStates[shop.connectionKey()],
                 portalUrl = shopPreferences.portalUrl(shop),
                 onClick = { onOpenStatistics(shop.connectionKey()) },
                 onTransfer = { onTransfer(shop) },
@@ -542,6 +561,7 @@ private fun HeroMetric(label: String, value: String, icon: ImageVector, modifier
 private fun ShopDashboardCard(
     shop: ShopConnection,
     dashboard: Dashboard?,
+    localTransferState: LocalDropshippingState?,
     portalUrl: String,
     onClick: () -> Unit,
     onTransfer: () -> Unit,
@@ -578,9 +598,9 @@ private fun ShopDashboardCard(
                         modifier = Modifier.clickable(onClick = onTransfer).padding(vertical = 2.dp),
                     )
                     Spacer(Modifier.weight(1f))
-                    Text((dashboard?.dropshipPending ?: 0).toString(), color = Negative, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+                    Text((localTransferState?.pending ?: 0).toString(), color = Negative, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
                     Text(" / ", color = Muted, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    Text((dashboard?.dropshipTransferred ?: 0).toString(), color = Positive, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+                    Text((localTransferState?.transferred ?: 0).toString(), color = Positive, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
                 }
             }
         }

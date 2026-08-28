@@ -29,7 +29,6 @@ class Repository(private val context:Context) {
     suspend fun registerPushToken(token:String) = coroutineScope { shops().map { s -> async { runCatching { ApiFactory.forShop(s).pushToken(PushTokenRequest(token)) } } }.awaitAll() }
     suspend fun setPushToken(shop:ShopConnection, token:String) = runCatching { ApiFactory.forShop(shop).pushToken(PushTokenRequest(token)) }
     suspend fun dropshipping(shop:ShopConnection): DropshippingState = ApiFactory.forShop(shop).dropshipping().data ?: DropshippingState()
-    suspend fun markTransferred(shop:ShopConnection, orderIds:List<String>): Int = ApiFactory.forShop(shop).markTransferred(MarkTransferredRequest(orderIds)).data?.get("updated") ?: 0
     fun shopByDeviceId(deviceId:String):ShopConnection? = shops().firstOrNull { it.deviceId == deviceId }
     fun shopByConnectionKey(connectionKey:String):ShopConnection? = shops().firstOrNull { it.connectionKey() == connectionKey }
 

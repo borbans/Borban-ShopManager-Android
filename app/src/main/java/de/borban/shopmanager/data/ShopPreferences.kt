@@ -25,6 +25,25 @@ class ShopPreferences(context: Context) {
         prefs.edit().putString("portal_${shop.connectionKey()}", url.trim()).apply()
     }
 
+    private fun transferredKey(shop: ShopConnection): String = "transferred_${shop.connectionKey()}"
+
+    fun transferredOrderIds(shop: ShopConnection): Set<String> =
+        prefs.getStringSet(transferredKey(shop), emptySet())?.toSet().orEmpty()
+
+    fun reconcileTransfers(shop: ShopConnection, processingOrderIds: List<String>): LocalDropshippingState {
+        val stored = transferredOrderIds(shop)
+        val state = reconcileLocalTransfers(processingOrderIds, stored)
+        if (state.transferredOrderIds != stored) {
+            prefs.edit().putStringSet(transferredKey(shop), state.transferredOrderIds).apply()
+        }
+        return state
+    }
+
+    fun markTransferred(shop: ShopConnection, orderIds: List<String>) {
+        val merged = transferredOrderIds(shop) + orderIds.map { it.trim() }.filter { it.isNotEmpty() }
+        prefs.edit().putStringSet(transferredKey(shop), merged).apply()
+    }
+
     fun beginTransfer(shop: ShopConnection, orderIds: List<String>) {
         val batch = StoredTransferBatch(shop.connectionKey(), orderIds.distinct(), System.currentTimeMillis())
         prefs.edit().putString("pending_transfer", gson.toJson(batch)).apply()

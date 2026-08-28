@@ -23,7 +23,6 @@ interface ShopApi {
     @POST("borban-shopmanager/api/v1/orders/{id}/transition") suspend fun transition(@Path("id") id:String,@Body body:TransitionRequest): ApiEnvelope<Map<String,Boolean>>
     @POST("borban-shopmanager/api/v1/device/push-token") suspend fun pushToken(@Body body:PushTokenRequest): ApiEnvelope<Map<String,Boolean>>
     @GET("borban-shopmanager/api/v1/dropshipping") suspend fun dropshipping(): ApiEnvelope<DropshippingState>
-    @POST("borban-shopmanager/api/v1/dropshipping/transferred") suspend fun markTransferred(@Body body:MarkTransferredRequest): ApiEnvelope<Map<String,Int>>
 }
 
 object ApiFactory {
