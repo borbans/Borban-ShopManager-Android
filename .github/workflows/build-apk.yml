@@ -130,7 +130,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Borban-ShopManager-0.2.2-Push-Signed
+          name: Borban-ShopManager-0.2.3-Premium-Signed
           path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
 

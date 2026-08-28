@@ -4,14 +4,18 @@ package de.borban.shopmanager
 
 import android.Manifest
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,6 +28,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -38,6 +43,7 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Euro
+import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.PendingActions
 import androidx.compose.material.icons.outlined.QueryStats
@@ -100,11 +106,14 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import de.borban.shopmanager.data.Dashboard
 import de.borban.shopmanager.data.OrderDetail
 import de.borban.shopmanager.data.OrderSummary
+import de.borban.shopmanager.data.PendingTransferBatch
 import de.borban.shopmanager.data.Repository
+import de.borban.shopmanager.data.ShopPreferences
 import de.borban.shopmanager.data.ShopConnection
 import de.borban.shopmanager.data.StatBucket
 import de.borban.shopmanager.data.StatisticsRange
 import de.borban.shopmanager.data.connectionKey
+import de.borban.shopmanager.data.normalizePortalUrl
 import de.borban.shopmanager.push.PushCoordinator
 import de.borban.shopmanager.push.PushNavigation
 import de.borban.shopmanager.push.PushTarget
@@ -128,9 +137,24 @@ private val Positive = Color(0xFF12835C)
 private val Negative = Color(0xFFC34242)
 private val Warning = Color(0xFFC27A16)
 
+private object TransferReturnSignal {
+    var tick by mutableIntStateOf(0)
+        private set
+    private var armed = false
+
+    fun arm() { armed = true }
+    fun onResume() {
+        if (armed) {
+            armed = false
+            tick++
+        }
+    }
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         PushNavigation.openFromIntent(intent)
         setContent {
             BorbanTheme {
@@ -138,6 +162,11 @@ class MainActivity : ComponentActivity() {
                 ShopManagerUi()
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        TransferReturnSignal.onResume()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -206,6 +235,12 @@ class MainVm(private val repo: Repository) : androidx.lifecycle.ViewModel() {
 fun ShopManagerUi() {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val vm: MainVm = viewModel(factory = MainVm.factory(ctx))
+    val repo = remember(ctx) { Repository(ctx) }
+    val shopPreferences = remember(ctx) { ShopPreferences(ctx) }
+    val scope = rememberCoroutineScope()
+    var transferPrompt by remember { mutableStateOf<PendingTransferBatch?>(null) }
+    var transferBusy by remember { mutableStateOf(false) }
+    var transferError by remember { mutableStateOf<String?>(null) }
     var tab by remember { mutableIntStateOf(0) }
     var add by remember { mutableStateOf(false) }
     var statisticsRange by remember { mutableStateOf("day") }
@@ -214,6 +249,25 @@ fun ShopManagerUi() {
 
     LaunchedEffect(Unit) { vm.refresh() }
     LaunchedEffect(pushTarget) { if (pushTarget != null) tab = 2 }
+    LaunchedEffect(TransferReturnSignal.tick) {
+        shopPreferences.pendingTransfer()?.takeIf { it.orderIds.isNotEmpty() }?.let { transferPrompt = it }
+    }
+
+    fun openTransferPortal(shop: ShopConnection) {
+        val url = shopPreferences.portalUrl(shop)
+        if (url.isBlank()) return
+        scope.launch {
+            val state = runCatching { repo.dropshipping(shop) }.getOrNull()
+            val pendingIds = state?.pendingOrderIds.orEmpty()
+            if (pendingIds.isNotEmpty()) shopPreferences.beginTransfer(shop, pendingIds)
+            TransferReturnSignal.arm()
+            runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+                .onFailure {
+                    shopPreferences.clearPendingTransfer()
+                    transferError = "Bestellportal konnte nicht geöffnet werden."
+                }
+        }
+    }
 
     Scaffold(
         containerColor = Canvas,
@@ -222,11 +276,16 @@ fun ShopManagerUi() {
     ) { padding ->
         Box(Modifier.padding(padding).fillMaxSize()) {
             when (tab) {
-                0 -> DashboardScreen(vm) { shopKey ->
-                    statisticsShopKey = shopKey
-                    statisticsRange = "day"
-                    tab = 1
-                }
+                0 -> DashboardScreen(
+                    vm = vm,
+                    shopPreferences = shopPreferences,
+                    onOpenStatistics = { shopKey ->
+                        statisticsShopKey = shopKey
+                        statisticsRange = "day"
+                        tab = 1
+                    },
+                    onTransfer = { openTransferPortal(it) },
+                )
                 1 -> StatisticsScreen(
                     vm = vm,
                     range = statisticsRange,
@@ -242,6 +301,53 @@ fun ShopManagerUi() {
     }
 
     if (add) PairDialog(vm) { add = false }
+
+    transferPrompt?.let { batch ->
+        val shop = vm.shops.firstOrNull { it.connectionKey() == batch.connectionKey }
+        if (shop == null) {
+            LaunchedEffect(batch.connectionKey) {
+                shopPreferences.clearPendingTransfer()
+                transferPrompt = null
+            }
+        } else {
+            AlertDialog(
+                onDismissRequest = {},
+                title = { Text("Übertragung") },
+                text = { Text("${batch.orderIds.size} ${if (batch.orderIds.size == 1) "Bestellung" else "Bestellungen"} übertragen?") },
+                dismissButton = {
+                    TextButton(enabled = !transferBusy, onClick = {
+                        shopPreferences.clearPendingTransfer()
+                        transferPrompt = null
+                    }) { Text("Noch nicht") }
+                },
+                confirmButton = {
+                    Button(enabled = !transferBusy, onClick = {
+                        scope.launch {
+                            transferBusy = true
+                            val result = runCatching { repo.markTransferred(shop, batch.orderIds) }
+                            transferBusy = false
+                            if (result.isSuccess) {
+                                shopPreferences.clearPendingTransfer()
+                                transferPrompt = null
+                                vm.refresh()
+                            } else {
+                                transferError = "Übertragungsstatus konnte nicht gespeichert werden."
+                            }
+                        }
+                    }) { Text(if (transferBusy) "Speichere…" else "Ja") }
+                },
+            )
+        }
+    }
+
+    transferError?.let { message ->
+        AlertDialog(
+            onDismissRequest = { transferError = null },
+            title = { Text("Hinweis") },
+            text = { Text(message) },
+            confirmButton = { TextButton(onClick = { transferError = null }) { Text("OK") } },
+        )
+    }
 }
 
 @Composable
@@ -250,7 +356,8 @@ private fun PremiumHeader(onRefresh: () -> Unit, onAdd: () -> Unit) {
         Modifier
             .fillMaxWidth()
             .background(Brush.horizontalGradient(listOf(BrandDeep, Brand, Aqua)))
-            .padding(horizontal = 18.dp, vertical = 14.dp),
+            .statusBarsPadding()
+            .padding(horizontal = 18.dp, vertical = 12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -317,11 +424,17 @@ private fun PremiumBottomBar(tab: Int, onTab: (Int) -> Unit) {
 }
 
 @Composable
-private fun DashboardScreen(vm: MainVm, onOpenStatistics: (String) -> Unit) {
+private fun DashboardScreen(
+    vm: MainVm,
+    shopPreferences: ShopPreferences,
+    onOpenStatistics: (String) -> Unit,
+    onTransfer: (ShopConnection) -> Unit,
+) {
     val dashboards = vm.dashboards.values
     val revenue = dashboards.sumOf { it.today.revenue }
     val orders = dashboards.sumOf { it.today.orders }
     val open = dashboards.sumOf { it.openOrders }
+    val processing = dashboards.sumOf { it.processingOrders }
     val paid = dashboards.sumOf { it.paidToday }
     val yesterdayRevenue = dashboards.sumOf { it.yesterday.revenue }
     val updatedAt = dashboards.map { it.generatedAt }.maxOrNull()
@@ -346,7 +459,7 @@ private fun DashboardScreen(vm: MainVm, onOpenStatistics: (String) -> Unit) {
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
-            DashboardHero(revenue, orders, open, paid, yesterdayRevenue)
+            DashboardHero(revenue, orders, open, processing, paid, yesterdayRevenue)
         }
         item {
             Row(verticalAlignment = Alignment.Bottom) {
@@ -361,13 +474,19 @@ private fun DashboardScreen(vm: MainVm, onOpenStatistics: (String) -> Unit) {
             item { EmptyState("Noch kein Shop gekoppelt") }
         }
         items(sortedShops, key = { it.connectionKey() }) { shop ->
-            ShopDashboardCard(shop, vm.dashboards[shop]) { onOpenStatistics(shop.connectionKey()) }
+            ShopDashboardCard(
+                shop = shop,
+                dashboard = vm.dashboards[shop],
+                portalUrl = shopPreferences.portalUrl(shop),
+                onClick = { onOpenStatistics(shop.connectionKey()) },
+                onTransfer = { onTransfer(shop) },
+            )
         }
     }
 }
 
 @Composable
-private fun DashboardHero(revenue: Double, orders: Int, open: Int, paid: Int, yesterdayRevenue: Double) {
+private fun DashboardHero(revenue: Double, orders: Int, open: Int, processing: Int, paid: Int, yesterdayRevenue: Double) {
     val change = percentChange(revenue, yesterdayRevenue)
     Box(
         Modifier
@@ -396,8 +515,8 @@ private fun DashboardHero(revenue: Double, orders: Int, open: Int, paid: Int, ye
                 HeroMetric("Offen", open.toString(), Icons.Outlined.PendingActions, Modifier.weight(1f))
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                HeroMetric("Bearbeitung", processing.toString(), Icons.Outlined.QueryStats, Modifier.weight(1f))
                 HeroMetric("Bezahlt", paid.toString(), Icons.Outlined.CheckCircle, Modifier.weight(1f))
-                HeroMetric("Ø Warenkorb", if (orders > 0) money(revenue / orders) else money(0.0), Icons.Outlined.ShowChart, Modifier.weight(1f))
             }
         }
     }
@@ -420,9 +539,15 @@ private fun HeroMetric(label: String, value: String, icon: ImageVector, modifier
 }
 
 @Composable
-private fun ShopDashboardCard(shop: ShopConnection, dashboard: Dashboard?, onClick: () -> Unit) {
+private fun ShopDashboardCard(
+    shop: ShopConnection,
+    dashboard: Dashboard?,
+    portalUrl: String,
+    onClick: () -> Unit,
+    onTransfer: () -> Unit,
+) {
     PremiumCard(onClick = onClick) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(color = Color(0xFFE0F3FA), shape = RoundedCornerShape(16.dp)) {
                     Icon(Icons.Outlined.Store, shop.name, tint = Brand, modifier = Modifier.padding(11.dp).size(24.dp))
@@ -437,10 +562,26 @@ private fun ShopDashboardCard(shop: ShopConnection, dashboard: Dashboard?, onCli
                     Text("heute", color = Muted, fontSize = 11.sp)
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 ShopStat("Bestellungen", (dashboard?.today?.orders ?: 0).toString(), Modifier.weight(1f))
                 ShopStat("Offen", (dashboard?.openOrders ?: 0).toString(), Modifier.weight(1f))
+                ShopStat("Bearbeitung", (dashboard?.processingOrders ?: 0).toString(), Modifier.weight(1f))
                 ShopStat("Bezahlt", (dashboard?.paidToday ?: 0).toString(), Modifier.weight(1f))
+            }
+            if (portalUrl.isNotBlank()) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Übertragen ↗",
+                        color = Brand,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clickable(onClick = onTransfer).padding(vertical = 2.dp),
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Text((dashboard?.dropshipPending ?: 0).toString(), color = Negative, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+                    Text(" / ", color = Muted, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text((dashboard?.dropshipTransferred ?: 0).toString(), color = Positive, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+                }
             }
         }
     }
@@ -449,10 +590,10 @@ private fun ShopDashboardCard(shop: ShopConnection, dashboard: Dashboard?, onCli
 @Composable
 private fun ShopStat(label: String, value: String, modifier: Modifier = Modifier) {
     Surface(modifier, color = Color(0xFFF3F8FB), shape = RoundedCornerShape(16.dp)) {
-        Column(Modifier.padding(horizontal = 10.dp, vertical = 11.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(value, color = Ink, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+        Column(Modifier.padding(horizontal = 6.dp, vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(value, color = Ink, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
             Spacer(Modifier.height(2.dp))
-            Text(label, color = Muted, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+            Text(label, color = Muted, fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
         }
     }
 }
@@ -668,33 +809,51 @@ private fun ComparisonRow(label: String, value: Double?, previous: String) {
 @Composable
 private fun RevenueChartCard(stats: StatisticsRange) {
     var mode by remember { mutableStateOf("revenue") }
+    val previousBuckets = stats.previousBuckets.orEmpty()
+    val hasPrevious = previousBuckets.size == stats.buckets.size
     val maxValue = remember(stats, mode) {
-        if (mode == "revenue") stats.buckets.maxOfOrNull { it.revenue } ?: 0.0
-        else stats.buckets.maxOfOrNull { it.orders.toDouble() } ?: 0.0
-    }.coerceAtLeast(1.0)
+        val currentMax = if (mode == "revenue") stats.buckets.maxOfOrNull { it.revenue } ?: 0.0 else stats.buckets.maxOfOrNull { it.orders.toDouble() } ?: 0.0
+        val previousMax = if (mode == "revenue") previousBuckets.maxOfOrNull { it.revenue } ?: 0.0 else previousBuckets.maxOfOrNull { it.orders.toDouble() } ?: 0.0
+        maxOf(currentMax, previousMax).coerceAtLeast(1.0)
+    }
 
     PremiumCard {
         Column(Modifier.padding(17.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     SectionMiniTitle(if (mode == "revenue") "Umsatzverlauf" else "Bestellverlauf")
-                    Text("${stats.buckets.size} Zeitpunkte", color = Muted, fontSize = 11.sp)
+                    Text(stats.label, color = Muted, fontSize = 11.sp)
                 }
                 MiniChartToggle(mode, onChange = { mode = it })
             }
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(if (stats.buckets.size <= 12) 10.dp else 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(if (stats.buckets.size <= 12) 8.dp else 5.dp),
                 verticalAlignment = Alignment.Bottom,
             ) {
                 stats.buckets.forEachIndexed { index, bucket ->
-                    PremiumBar(bucket, maxValue, mode, showLabel = stats.buckets.size <= 12 || index % 5 == 0 || index == stats.buckets.lastIndex)
+                    PremiumBar(
+                        bucket = bucket,
+                        previous = previousBuckets.getOrNull(index),
+                        maxValue = maxValue,
+                        mode = mode,
+                        showLabel = stats.buckets.size <= 12 || index % 5 == 0 || index == stats.buckets.lastIndex,
+                    )
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(8.dp).clip(CircleShape).background(Aqua))
-                Spacer(Modifier.width(6.dp))
-                Text(if (mode == "revenue") "Balkenhöhe = Umsatz" else "Balkenhöhe = Bestellungen", color = Muted, fontSize = 11.sp)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(8.dp).clip(CircleShape).background(Brand))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Aktuell", color = Muted, fontSize = 11.sp)
+                }
+                if (hasPrevious) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(8.dp).clip(CircleShape).background(Brand.copy(alpha = 0.16f)))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Vorperiode", color = Muted, fontSize = 11.sp)
+                    }
+                }
             }
         }
     }
@@ -718,10 +877,11 @@ private fun MiniChartToggle(selected: String, onChange: (String) -> Unit) {
 }
 
 @Composable
-private fun PremiumBar(bucket: StatBucket, maxValue: Double, mode: String, showLabel: Boolean) {
+private fun PremiumBar(bucket: StatBucket, previous: StatBucket?, maxValue: Double, mode: String, showLabel: Boolean) {
     val value = if (mode == "revenue") bucket.revenue else bucket.orders.toDouble()
-    val fraction = (value / maxValue).coerceIn(if (value > 0) 0.05 else 0.0, 1.0)
-    val width = if (mode == "revenue") 30.dp else 28.dp
+    val previousValue = if (mode == "revenue") previous?.revenue ?: 0.0 else previous?.orders?.toDouble() ?: 0.0
+    val fraction = (value / maxValue).coerceIn(if (value > 0) 0.045 else 0.0, 1.0)
+    val previousFraction = (previousValue / maxValue).coerceIn(if (previousValue > 0) 0.035 else 0.0, 1.0)
 
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.widthIn(min = 34.dp)) {
         Text(
@@ -730,21 +890,32 @@ private fun PremiumBar(bucket: StatBucket, maxValue: Double, mode: String, showL
                 mode == "revenue" -> moneyCompact(value)
                 else -> value.toInt().toString()
             },
-            color = Muted,
+            color = Ink,
             fontSize = 9.sp,
+            fontWeight = FontWeight.SemiBold,
             maxLines = 1,
         )
         Spacer(Modifier.height(5.dp))
-        Box(Modifier.height(146.dp).width(width).clip(RoundedCornerShape(10.dp)).background(Color(0xFFF0F5F8)), contentAlignment = Alignment.BottomCenter) {
+        Box(Modifier.height(146.dp).width(32.dp), contentAlignment = Alignment.BottomCenter) {
+            if (previousFraction > 0) {
+                Box(
+                    Modifier
+                        .width(28.dp)
+                        .height((136 * previousFraction).dp)
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(Brand.copy(alpha = 0.12f)),
+                )
+            }
             if (fraction > 0) {
                 Box(
                     Modifier
-                        .fillMaxWidth()
-                        .height((132 * fraction).dp)
-                        .clip(RoundedCornerShape(10.dp))
+                        .width(17.dp)
+                        .height((136 * fraction).dp)
+                        .clip(RoundedCornerShape(8.dp))
                         .background(Brush.verticalGradient(listOf(Aqua, Brand))),
                 )
             }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Line))
         }
         Spacer(Modifier.height(7.dp))
         Text(if (showLabel) bucket.label else "", color = Muted, fontSize = 9.sp, maxLines = 1)
@@ -953,6 +1124,10 @@ private fun OrderDetailDialog(order: OrderDetail, shop: ShopConnection, onDismis
 @Composable
 private fun ShopsScreen(vm: MainVm, onAdd: () -> Unit) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
+    val shopPreferences = remember(ctx) { ShopPreferences(ctx) }
+    var portalShop by remember { mutableStateOf<ShopConnection?>(null) }
+    var portalValue by remember { mutableStateOf("") }
+    var portalError by remember { mutableStateOf<String?>(null) }
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 16.dp, bottom = 24.dp),
@@ -987,6 +1162,13 @@ private fun ShopsScreen(vm: MainVm, onAdd: () -> Unit) {
                                 Spacer(Modifier.width(5.dp))
                                 Text("Direkt verbunden · eigener Geräteschlüssel", color = Positive, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
+                        }
+                        IconButton(onClick = {
+                            portalShop = shop
+                            portalValue = shopPreferences.portalUrl(shop)
+                            portalError = null
+                        }) {
+                            Icon(Icons.Outlined.Link, "Dropshipping-Link", tint = if (shopPreferences.portalUrl(shop).isNotBlank()) Brand else Muted)
                         }
                         IconButton(onClick = { vm.remove(shop.connectionKey()) }) { Icon(Icons.Outlined.Delete, "Entfernen", tint = Muted) }
                     }
@@ -1024,6 +1206,38 @@ private fun ShopsScreen(vm: MainVm, onAdd: () -> Unit) {
                 }
             }
         }
+    }
+
+    portalShop?.let { shop ->
+        AlertDialog(
+            onDismissRequest = { portalShop = null },
+            title = { Text("Dropshipping-Link") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = portalValue,
+                        onValueChange = { portalValue = it; portalError = null },
+                        label = { Text("Bestellportal") },
+                        placeholder = { Text("https://…/orders") },
+                        singleLine = true,
+                    )
+                    Text("Leer lassen, wenn der Shop kein manuelles Bestellportal nutzt.", color = Muted, fontSize = 11.sp)
+                    portalError?.let { Text(it, color = Negative, fontSize = 11.sp) }
+                }
+            },
+            dismissButton = { TextButton(onClick = { portalShop = null }) { Text("Abbrechen") } },
+            confirmButton = {
+                Button(onClick = {
+                    val normalized = normalizePortalUrl(portalValue)
+                    if (portalValue.isNotBlank() && normalized.isBlank()) {
+                        portalError = "Bitte eine gültige http/https-Adresse eintragen."
+                    } else {
+                        shopPreferences.setPortalUrl(shop, normalized)
+                        portalShop = null
+                    }
+                }) { Text("Speichern") }
+            },
+        )
     }
 }
 

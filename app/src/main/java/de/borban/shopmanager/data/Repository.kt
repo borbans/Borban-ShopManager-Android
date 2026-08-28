@@ -28,6 +28,8 @@ class Repository(private val context:Context) {
     suspend fun transition(shop:ShopConnection,id:String,group:String,action:String) = ApiFactory.forShop(shop).transition(id,TransitionRequest(group,action)).ok
     suspend fun registerPushToken(token:String) = coroutineScope { shops().map { s -> async { runCatching { ApiFactory.forShop(s).pushToken(PushTokenRequest(token)) } } }.awaitAll() }
     suspend fun setPushToken(shop:ShopConnection, token:String) = runCatching { ApiFactory.forShop(shop).pushToken(PushTokenRequest(token)) }
+    suspend fun dropshipping(shop:ShopConnection): DropshippingState = ApiFactory.forShop(shop).dropshipping().data ?: DropshippingState()
+    suspend fun markTransferred(shop:ShopConnection, orderIds:List<String>): Int = ApiFactory.forShop(shop).markTransferred(MarkTransferredRequest(orderIds)).data?.get("updated") ?: 0
     fun shopByDeviceId(deviceId:String):ShopConnection? = shops().firstOrNull { it.deviceId == deviceId }
     fun shopByConnectionKey(connectionKey:String):ShopConnection? = shops().firstOrNull { it.connectionKey() == connectionKey }
 
@@ -72,7 +74,23 @@ class Repository(private val context:Context) {
                 averageOrderValuePercent = percentChange(finalSummary.averageOrderValue, finalPrevious.averageOrderValue),
             ),
             buckets = bucketMap.values.toList(),
+            previousBuckets = aggregatePreviousBuckets(entries),
         )
+    }
+
+    private fun aggregatePreviousBuckets(entries:List<StatisticsRange>): List<StatBucket> {
+        val size = entries.maxOfOrNull { it.previousBuckets.orEmpty().size } ?: 0
+        if (size == 0) return emptyList()
+        return (0 until size).map { index ->
+            val samples = entries.mapNotNull { it.previousBuckets.orEmpty().getOrNull(index) }
+            val first = samples.firstOrNull() ?: StatBucket(index.toString(), "")
+            StatBucket(
+                key = first.key,
+                label = first.label,
+                revenue = samples.sumOf { it.revenue },
+                orders = samples.sumOf { it.orders },
+            )
+        }
     }
 
     private fun percentChange(current:Double, previous:Double):Double? {
