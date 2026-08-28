@@ -77,6 +77,43 @@ jobs:
           BORBAN_FIREBASE_SENDER_ID: ${{ secrets.BORBAN_FIREBASE_SENDER_ID }}
         run: gradle --no-daemon --stacktrace --warning-mode all :app:assembleRelease
 
+      - name: Verify Firebase resources in APK
+        env:
+          FIREBASE_APP_ID: ${{ secrets.BORBAN_FIREBASE_APP_ID }}
+          FIREBASE_API_KEY: ${{ secrets.BORBAN_FIREBASE_API_KEY }}
+          FIREBASE_PROJECT_ID: ${{ secrets.BORBAN_FIREBASE_PROJECT_ID }}
+          FIREBASE_SENDER_ID: ${{ secrets.BORBAN_FIREBASE_SENDER_ID }}
+        run: |
+          APK=app/build/outputs/apk/release/app-release.apk
+          AAPT2="$ANDROID_SDK_ROOT/build-tools/35.0.0/aapt2"
+          read_resource() {
+            "$AAPT2" dump resources "$APK" | awk -v target="string/$1" '
+              index($0, target) {
+                getline
+                line=$0
+                sub(/^[[:space:]]*\(\) "/, "", line)
+                sub(/"$/, "", line)
+                print line
+                exit
+              }
+            '
+          }
+          check_resource() {
+            actual="$(read_resource "$1")"
+            if [ -z "$actual" ]; then
+              echo "Firebase resource $1 is empty"
+              exit 1
+            fi
+            if [ "$actual" != "$2" ]; then
+              echo "Firebase resource $1 does not match its configured secret"
+              exit 1
+            fi
+          }
+          check_resource firebase_app_id "$FIREBASE_APP_ID"
+          check_resource firebase_api_key "$FIREBASE_API_KEY"
+          check_resource firebase_project_id "$FIREBASE_PROJECT_ID"
+          check_resource firebase_sender_id "$FIREBASE_SENDER_ID"
+
       - name: Verify APK signature
         env:
           EXPECTED_CERT_SHA256: 14ea854648998f13af61f9d16a3c81e1555c95ed70b3c1764c286c292109bc75

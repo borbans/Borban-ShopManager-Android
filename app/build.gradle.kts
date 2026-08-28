@@ -4,7 +4,9 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-fun prop(name: String): String = providers.gradleProperty(name).orElse(providers.environmentVariable(name)).orElse("").get()
+fun prop(name: String): String =
+    providers.gradleProperty(name).orNull?.takeIf { it.isNotBlank() }
+        ?: providers.environmentVariable(name).orNull.orEmpty()
 
 val signingStorePath = System.getenv("BORBAN_KEYSTORE_PATH")
 val signingStorePassword = System.getenv("BORBAN_KEYSTORE_PASSWORD")
